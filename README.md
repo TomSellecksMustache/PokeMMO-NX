@@ -49,4 +49,4 @@ podman run --rm -v "$PWD":/work:Z -w /work/native docker.io/devkitpro/devkita64 
 
 MIT, see `LICENSE`. Original copyright: Petit_Prince. Additions in this fork are also MIT. Third-party libraries: `THIRD-PARTY-NOTICES.md`.
 
-Thanks to Petit_Prince for PokeMMO-NX, the PokeMMO team for the game (the client is not included), and [PokeAPI](https://github.com/PokeAPI/pokeapi) for the egg-group data.
+Thanks to Petit_Prince for PokeMMO-NX, the PokeMMO team for the game, and [PokeAPI](https://github.com/PokeAPI/pokeapi) for the egg-group data.
