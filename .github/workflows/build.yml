@@ -1,0 +1,22 @@
+name: NXpanded Build
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # Use the official devkitPro Docker image, which has all Switch build tools pre-installed
+    container: devkitpro/devkita64:latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build project
+        run: |
+          cd native
+          make -j2
