@@ -1,3 +1,5 @@
+[![NXpanded Build](https://github.com/TomSellecksMustache/PokeMMO-NXpanded/actions/workflows/build.yml/badge.svg)](https://github.com/TomSellecksMustache/PokeMMO-NXpanded/actions/workflows/build.yml)
+
 # PokeMMO-NXpanded
 <img width="2306" height="1289" alt="Untitled" src="https://github.com/user-attachments/assets/43bf8dd0-27b0-4c9e-ba1a-d19e941da828" />
 
