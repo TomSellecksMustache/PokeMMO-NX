@@ -35,7 +35,7 @@ The overlay only draws its own pixels and reads the controller input the loader 
 podman run --rm -v "$PWD":/work:Z -w /work/native docker.io/devkitpro/devkita64 make -j2
 ```
 
-3. Launch in application mode and press R + D-pad right + R3.
+Launch in application mode and press R + D-pad right + R3.
 
 ## Limits
 
