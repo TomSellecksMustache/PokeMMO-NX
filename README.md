@@ -31,11 +31,23 @@ Your data is plain text on the SD card: `switch/PokeMMO-NXpanded/breeding.csv` a
 
 The overlay only draws its own pixels and reads the controller input the loader already has. It never touches the game client, its memory or network, and never sends input to the game. That is a design rule, not a guarantee.
 
-## Install and build
+## Build Instructions
 
+To ensure a consistent and reproducible build environment across all operating systems (Windows, macOS, and Linux), I recommend building the project using a container. 
+
+### Prerequisites
+You must have either [Docker](https://www.docker.com/) or [Podman](https://podman.io/) installed on your system.
+
+### Building the Project
+Run the following command from the **root directory** of this repository. This will mount your current folder into the official devkitPro container and compile the project.
+
+**For Docker (Windows, macOS, most Linux):**
 ```bash
-podman run --rm -v "$PWD":/work:Z -w /work/native docker.io/devkitpro/devkita64 make -j2
-```
+docker run --rm -v "${PWD}":/work -w /work/native devkitpro/devkita64 make -j2
+
+**For Podman (Fedora, RHEL, CentOS):**
+```bash
+podman run --rm -v "${PWD}":/work -w /work/native docker.io/devkitpro/devkita64 make -j2
 
 Launch in application mode and press R + D-pad right + R3.
 
