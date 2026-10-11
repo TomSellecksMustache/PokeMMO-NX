@@ -1,4 +1,4 @@
-# PokeMMO-NX Overlay
+# PokeMMO-NXpanded
 
 A fork of [PokeMMO-NX](https://github.com/Petit-Prince-dev/PokeMMO-NX) by Petit_Prince, which runs the official PokeMMO client on the Nintendo Switch. The loader is entirely his work (as far as I know, built largely with AI assistance) and this fork is based on his version 1.1.4. For game setup, ROMs and launching, follow the [upstream README](https://github.com/Petit-Prince-dev/PokeMMO-NX#readme).
 
