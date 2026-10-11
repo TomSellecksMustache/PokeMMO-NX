@@ -1,66 +1,52 @@
-# PokeMMO-NX
+# PokeMMO-NX Overlay
 
-Plays PokeMMO natively on a Nintendo Switch, in Horizon OS, the console's official OS. No need to install Android or Linux anymore :D
+A fork of [PokeMMO-NX](https://github.com/Petit-Prince-dev/PokeMMO-NX) by Petit_Prince, which runs the official PokeMMO client on the Nintendo Switch. The loader is entirely his work (as far as I know, built largely with AI assistance) and this fork is based on his version 1.1.4. For game setup, ROMs and launching, follow the [upstream README](https://github.com/Petit-Prince-dev/PokeMMO-NX#readme).
 
-The official Linux ARM64 PokeMMO client runs as is, through a loader written in C on top of libnx.
+**I've added a breeding overlay.** That is the reason for this fork. The goal is a small modular set of in-game helpers that make PokeMMO simpler to play on a console. Breeding is the first one, and the code is written with AI assistance (Claude).
 
-Unofficial project, not affiliated with PokeMMO. The release zip contains the official unmodified PokeMMO client (Linux ARM64 part only), which belongs to the PokeMMO team. The ROMs are not included, you must use your own.
+Unofficial project, not affiliated with PokeMMO or Nintendo.
 
-Version 1.1.4 - author: Petit_Prince
+## Breeding overlay
 
-## Just want to play?
+Say which Pokémon you want (species, nature, stats at 31) and what you own (Power items, Everstones, Pokémon). It plans every breed and shows you the **next step** over the game. Mark a step done and your stock and items update.
 
-Download `PokeMMO-NX-XXXXX.zip` from the Releases page. It contains everything needed.
+- **Smart plans:** uses what you already own, and accepts up to 3 extra breeds if that saves buying items.
+- **Set up on the console:** type the species with the console keyboard (the list narrows as you type); set nature, stats, items and stock with the D-pad.
+- **Breeding chains:** put one project aside, start another, and come back later. Nothing is lost.
+- **Egg groups** for all 649 species of generations 1 to 5, built in.
+- **Safe:** anything destructive asks first, with No selected by default.
 
-1. Copy the `switch` folder of the zip to the root of the SD card.
-2. Put your ROMs in `switch/PokeMMO/isolate-root/game/roms`.
-3. Start hbmenu **in application mode** (hold R while launching a game) and launch "PokeMMO". The game starts at once.
+| Button | Does |
+| --- | --- |
+| R + D-pad right + R3 | Open the overlay |
+| A | Done (asks first) |
+| Y / X | Items / all steps |
+| + / − | Setup / chains |
+| B | Back, close |
 
-The first launch builds its caches from your ROMs: 3 to 5 minutes of black screen, then it is fast.
+Your data is plain text on the SD card: `switch/PokeMMO/breeding.csv` and `switch/PokeMMO/chains/`.
 
-**Launch from the home menu (optional).** The zip also holds `switch/PokeMMO/PokeMMO-forwarder.nsp`. Install it with DBI (Install from the SD card): PokeMMO then appears in the home menu and starts directly, no need to hold R. Like any forwarder it needs the usual signature patches, and it launches `switch/PokeMMO/PokeMMO.nro`, so keep the folder where it is.
+The overlay only draws its own pixels and reads the controller input the loader already has. It never touches the game client, its memory or network, and never sends input to the game. That is a design rule, not a guarantee.
 
-## What is adapted to the Switch
+## Install and build
 
-- **Dynamic Resolution:** 1280x720 in handheld mode, 1920x1080 when docked. It changes while you play when you dock or undock the console.
-- **Touch screen:** a tap is a left click, a long press (finger held in place) is a right click, moving the finger drags.
-- **Cursor with the controller:** click the left stick (L3) to turn a cursor on or off. While it is on, the left stick moves it, ZR is the left click, ZL the right click, and the game does not see the controller.
-- **D-pad:** it is now mirrored on the left stick, so it moves your character and selects in menus like the stick does. Because of this, you lose the 4 D-pad hotkeys (1 to 4), but you can rebind 2 hotkeys to L and R, which the game doesn't use!
-- **Keyboard:** click the right stick (R3) to open or close the console's keyboard (login, chat).
-- **File chooser:** buttons such as "Select File" open a chooser drawn over the game. It shows the game's folders and the whole SD card (folder `sd`).
+1. Set up PokeMMO-NX as described upstream.
+2. Build and replace `switch/PokeMMO/PokeMMO.nro` (keep a backup of the old one):
 
-## Performance
-
-Even at default clocks the game can run at 120 fps. However, it suffers from loading stutters. I would recommend keeping it at 60 fps and using a light overclock to remove the stutters.
-
-## Diagnostics
-
-Nothing is written by default. To get a log, create an empty file named `debug.enabled` in `switch/PokeMMO` on the SD card, restart, reproduce the problem, leave the game, then read `switch/PokeMMO/diagnostics.log`.
-
-## Build (Windows, devkitPro)
-
-Requirements: devkitPro with devkitA64, libnx and the Switch portlibs (Mesa/EGL, zlib); Python 3.
-
-```powershell
-python tools/fetch_client.py            # the official client into private/ (once)
-python tools/fetch_runtime_libs.py      # libstdc++ / libgcc_s from Debian 12 (once)
-powershell -File tools/build.ps1        # native/PokeMMO.nro
-python tools/prepare_sd.py --client private/PokeMMO-Client.zip   # artifacts/sdmc and the release zip artifacts/PokeMMO-NX-<client revision>.zip
+```bash
+podman run --rm -v "$PWD":/work:Z -w /work/native docker.io/devkitpro/devkita64 make -j2
 ```
 
-The home menu launcher is an NSP made with an online NSP forwarder generator (NRO path `/switch/PokeMMO/PokeMMO.nro`). It is signed with the keys of whoever generates it, so it is not in the repository: add `--forwarder <file.nsp>` to put it in the zip.
+3. Launch in application mode and press R + D-pad right + R3.
 
-The zip holds the application, the Linux ARM64 part of the client and the two C++ runtime libraries (unmodified, from Debian, see `NOTICE.txt` in it). Without `--client` the zip has no client. The C code is formatted with `clang-format` (`native/.clang-format`).
+## Limits
 
-## License
+- Species are generations 1 to 5. Egg groups come from PokeAPI and differ from older data on a few species (Ralts and Trapinch lines).
+- The planner is tested against a reference on a PC. The newer screens are tested mostly by playing, so expect rough edges.
+- I can't say how PokeMMO's team views third-party tools. Read their rules and use this at your own risk.
 
-MIT, see `LICENSE`. The libraries linked into the application have their own licenses, see `THIRD-PARTY-NOTICES.md`. The PokeMMO client in the release zip belongs to the PokeMMO team.
+## License and credits
 
-## How it works
+MIT, see `LICENSE`. Original copyright: Petit_Prince. Additions in this fork are also MIT. Third-party libraries: `THIRD-PARTY-NOTICES.md`.
 
-- `main.c`, `game.c`: start the client's `main` on its own thread, wait for it, and leave the way a regular game does.
-- `elf_*.c`, `linux_dl.c`: ELF loader for the client and its libraries.
-- `linux_*.c`: the Linux libc the client expects (files, memory, threads, sockets...), adapted to Horizon. An unsupported call is refused cleanly.
-- `linux_sdl*.c`, `linux_audio*.c`, `linux_al.c`: SDL3 (window, events, controller, keyboard) and OpenAL written in C, with Mesa/EGL for the graphics.
-- `linux_gtk.c`, `linux_file_picker.c`: the file chooser.
-- `diagnostics.c`: the optional log.
+Thanks to Petit_Prince for PokeMMO-NX, the PokeMMO team for the game (the client is not included), and [PokeAPI](https://github.com/PokeAPI/pokeapi) for the egg-group data.

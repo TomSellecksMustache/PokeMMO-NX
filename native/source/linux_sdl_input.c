@@ -80,6 +80,7 @@ bool linuxSdlInputSample(LinuxInputSnapshot *snapshot) {
 // ---- inline keyboard ---------------------------------------------------------------------------------------------------------
 static atomic_bool kb_want, kb_failed, kb_initialized, kb_busy;
 static char kb_text[512];
+static void (*kb_target)(const char *text, int done);
 #define KB_PREFIX 64
 static uint64_t kb_launch_ns;
 static uint64_t nowNs(void) { return armTicksToNs(armGetSystemTick()); }
@@ -100,6 +101,10 @@ static void describe(const char *text, unsigned *letters, unsigned *digits, unsi
     }
 }
 static void onChanged(const char *text, SwkbdChangedStringArg *argument) {
+    if (kb_target) {
+        kb_target(text, 0);
+        return;
+    }
     unsigned queued = linuxSdlEventsTextChanged(kb_text, text, nowNs());
     snprintf(kb_text, sizeof(kb_text), "%s", text ? text : "");
     unsigned letters, digits, others;
@@ -109,6 +114,11 @@ static void onChanged(const char *text, SwkbdChangedStringArg *argument) {
 }
 static void onEnter(const char *text, SwkbdDecidedEnterArg *argument) {
     (void)argument;
+    if (kb_target) {
+        kb_target(text, 1);
+        atomic_store(&kb_want, false);
+        return;
+    }
     unsigned queued = linuxSdlEventsTextChanged(kb_text, text, nowNs());
     snprintf(kb_text, sizeof(kb_text), "%s", text ? text : "");
     linuxSdlEventsPushKey(LINUX_SDL_SCANCODE_RETURN, LINUX_SDL_KEY_RETURN, true, nowNs());
@@ -117,6 +127,7 @@ static void onEnter(const char *text, SwkbdDecidedEnterArg *argument) {
     trace("swkbd.inline=ENTER length=%zu events=%u", strlen(kb_text), queued);
 }
 static void onCancel(void) {
+    if (kb_target) kb_target(NULL, 2);
     atomic_store(&kb_want, false);
     trace("swkbd.inline=CANCEL");
 }
@@ -143,6 +154,7 @@ static void closeKeyboardLater(void) {
         closeKeyboard();
     }
 }
+void linuxSdlInputKeyboardTarget(void (*target)(const char *text, int done)) { kb_target = target; }
 void linuxSdlInputKeyboardRequest(bool show) { atomic_store(&kb_want, show); }
 bool linuxSdlInputKeyboardVisible(void) { return kb_phase >= KB_APPEARING && kb_phase <= KB_VISIBLE; }
 bool linuxSdlInputKeyboardAvailable(void) { return !atomic_load(&kb_failed); }

@@ -11,4 +11,6 @@ bool linuxSdlInputSample(LinuxInputSnapshot *snapshot);
 void linuxSdlInputKeyboardRequest(bool show);
 void linuxSdlInputKeyboardPump(void);
 bool linuxSdlInputKeyboardVisible(void);
+// While a target is set, what is typed goes to it and not to the game: done is 0 for a change of the text, 1 for enter and 2 for cancel.
+void linuxSdlInputKeyboardTarget(void (*target)(const char *text, int done));
 bool linuxSdlInputKeyboardAvailable(void);  // false when the inline keyboard cannot be started (the modal one is used instead)

@@ -1,6 +1,7 @@
 #include "linux_file_picker.h"
 #include "linux_directories.h"
 #include "linux_files.h"
+#include "linux_roadmap.h"
 #include "linux_sdl.h"
 #include <EGL/egl.h>
 #include <stdatomic.h>
@@ -548,7 +549,8 @@ static void drawPanel(void) {  // lock held
     }
 }
 void linuxFilePickerDraw(unsigned width, unsigned height) {
-    if (!atomic_load(&active) || atomic_load(&draw_failed)) return;
+    bool roadmap = !atomic_load(&active) && linuxRoadmapOpen();  // the breeding roadmap draws with the same state and font
+    if ((!atomic_load(&active) && !roadmap) || atomic_load(&draw_failed)) return;
     GLint program = 0, framebuffer = 0;
     if (!gl_ready) {
         if (!loadGl()) {
@@ -583,9 +585,13 @@ void linuxFilePickerDraw(unsigned width, unsigned height) {
         createFontTexture();
     else
         gl.BindTexture(GL_TEXTURE_2D, font_texture);
-    lock();
-    drawPanel();
-    unlock();
+    if (roadmap) {
+        linuxRoadmapDraw(rect, text);
+    } else {
+        lock();
+        drawPanel();
+        unlock();
+    }
     gl.MatrixMode(GL_MODELVIEW);
     gl.PopMatrix();
     gl.MatrixMode(GL_PROJECTION);

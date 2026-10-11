@@ -4,6 +4,7 @@
 #include "display.h"
 #include "linux_audio.h"
 #include "linux_file_picker.h"
+#include "linux_roadmap.h"
 #include "linux_format.h"
 #include "linux_threads.h"
 #include "linux_sdl_cursor.h"
@@ -508,7 +509,7 @@ static void applySizeRequest(void) {
 static bool sdlGlSwapWindow(void *window) {
     (void)window;
     if (egl_display == EGL_NO_DISPLAY || egl_surface == EGL_NO_SURFACE) return false;
-    if (linuxFilePickerOpen()) {
+    if (linuxFilePickerOpen() || linuxRoadmapOpen()) {
         unsigned w, h;
         screenSize(&w, &h);
         linuxFilePickerDraw(w, h);
@@ -555,9 +556,10 @@ static void pumpInput(void) {
     LinuxInputSnapshot snapshot;
     static bool keyboard_button_before, keyboard_has_pad;
     if (linuxSdlInputSample(&snapshot)) {
-        if (linuxFilePickerCapturesInput()) {
-            // The file chooser owns the controller and the touch screen: the game sees them idle, so that nothing stays pressed behind it.
+        if (linuxFilePickerCapturesInput() || linuxRoadmapCapturesInput()) {
+            // The file chooser (or the breeding roadmap) owns the controller and the touch screen: the game sees them idle, so that nothing stays pressed behind it.
             linuxFilePickerFeed(&snapshot);
+            linuxRoadmapFeed(&snapshot);
             LinuxInputSnapshot idle = {0};
             idle.gamepad = snapshot.gamepad;
             idle.timestamp_ns = snapshot.timestamp_ns;
@@ -568,7 +570,10 @@ static void pumpInput(void) {
         // Clicking the right stick brings the keyboard up or down, by hand, whatever the game is doing: the game's own requests for text
         // input are not followed (they only came for some fields).
         bool keyboard_button = snapshot.gamepad && ((snapshot.buttons >> 8) & 1u);  // SDL_GAMEPAD_BUTTON_RIGHT_STICK
-        if (keyboard_button && !keyboard_button_before && linuxSdlInputKeyboardAvailable()) {
+        bool roadmap_button = keyboard_button && ((snapshot.buttons >> 10) & 1u) && ((snapshot.buttons >> 14) & 1u);  // with R and D-pad right: the breeding roadmap
+        if (roadmap_button && !keyboard_button_before)
+            linuxRoadmapShow();
+        else if (keyboard_button && !keyboard_button_before && linuxSdlInputKeyboardAvailable()) {
             bool show = !linuxSdlInputKeyboardVisible();
             trace("sdl.keyboard.toggle show=%d", show);
             linuxSdlInputKeyboardRequest(show);
