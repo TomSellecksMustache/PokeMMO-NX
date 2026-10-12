@@ -45,6 +45,8 @@ extern const char *const BREED_NATURES[BREED_NATURE_COUNT];
 
 const char *breedProblem(const BreedState *state);  // why there is nothing to plan, NULL when there is
 void breedPlan(const BreedState *state, BreedPlan *plan);
+// For the entire remaining goal, not just the next step: quantities to buy after subtracting recorded stock.
+void breedShoppingList(const BreedState *state, const BreedPlan *plan, int to_buy[BREED_ITEMS]);
 void breedLabel(const BreedState *state, const BreedPlan *plan, BreedParent parent, char *out, size_t size);
 void breedResult(const BreedState *state, const BreedStep *step, char *out, size_t size);  // "3x31 (Atk/Spe/HP) + Adamant"
 void breedDone(BreedState *state, const BreedPlan *plan);                                   // the first step is made: its parents and items are used up, its offspring joins the stock

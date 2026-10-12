@@ -9,7 +9,8 @@ typedef void (*LinuxRoadmapRect)(float x, float y, float w, float h, float r, fl
 typedef void (*LinuxRoadmapText)(float x, float y, const char *string, unsigned max_chars, float r, float g, float b);
 
 // Used by the SDL layer.
-void linuxRoadmapShow(void);                               // loads the file and opens the roadmap
+void linuxRoadmapShow(void);
+void linuxRoadmapShowShopping(void);  // R + D-pad left + R3: read-only purchases for the active goal                               // loads the file and opens the roadmap
 bool linuxRoadmapOpen(void);                               // it is on the screen
 bool linuxRoadmapCapturesInput(void);                      // it is open, or its closing buttons have not been released yet
 void linuxRoadmapFeed(const LinuxInputSnapshot *snapshot);  // the sampled controller, while it captures it

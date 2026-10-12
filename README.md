@@ -14,7 +14,9 @@ A fork of [PokeMMO-NX](https://github.com/Petit-Prince-dev/PokeMMO-NX) by Petit-
 
 Say which Pokémon you want (species, nature, stats at 31) and what you own (Power items, Everstones, Pokémon). It plans every breed and shows you the **next step** over the game. Mark a step done and your stock and items update.
 
-- **Smart plans:** uses what you already own, and accepts up to 3 extra breeds if that saves buying items.
+- **Smart plans:** uses your recorded Pokémon and items, and accepts up to 3 extra breeds if that saves buying items.
+- **Shopping list:** R + D-pad left + R3 opens a read-only checklist of missing Power items and Everstones for the entire active goal (required minus owned).
+- **Stock-first queue:** independent steps using owned parents and held items move ahead of steps needing new purchases, without skipping prerequisite breeds. The next-step screen reports stock coverage and the full queue marks fully stocked steps with `*`.
 - **Set up on the console:** type the species with the console keyboard (the list narrows as you type); set nature, stats, items and stock with the D-pad.
 - **Breeding chains:** put one project aside, start another, and come back later. Nothing is lost.
 - **Egg groups:** all 649 species of generations 1 to 5, built in.
@@ -24,7 +26,8 @@ Say which Pokémon you want (species, nature, stats at 31) and what you own (Pow
 
 | Button               | Does                  |
 | -------------------- | --------------------- |
-| R + D-pad right + R3 | Open the overlay      |
+| R + D-pad right + R3 | Open the main overlay |
+| R + D-pad left + R3  | Show goal shopping list |
 | A                    | Done (asks first)     |
 | Y / X                | Items / all steps     |
 | + / −                | Setup / chains        |
@@ -32,10 +35,10 @@ Say which Pokémon you want (species, nature, stats at 31) and what you own (Pow
 
 ### Your data
 
-Your data is plain text on the SD card:
+Your data is plain text on the SD card. **Stock is entered manually** in the overlay; it never reads the game client or automatically discovers in-game Pokémon or items:
 
-- `switch/PokeMMO-NXpanded/breeding.csv`
-- `switch/PokeMMO-NXpanded/chains/`
+- `switch/PokeMMO/breeding.csv`
+- `switch/PokeMMO/chains/`
 
 ### Design rule
 
@@ -64,6 +67,14 @@ docker run --rm -v "${PWD}":/work -w /work/native devkitpro/devkita64 make -j2
 ```bash
 podman run --rm -v "${PWD}":/work -w /work/native docker.io/devkitpro/devkita64 make -j2
 ```
+
+### Test the breeding planner without a Switch
+
+```sh
+./tools/test_breeding.sh
+```
+
+This checks that owned Pokémon and held items are prioritized, that dependent breeds remain in order, and that stock and item quantities are consumed only once. It compiles the portable planner on your computer; it does not produce an `.nro`.
 
 ### Launching
 

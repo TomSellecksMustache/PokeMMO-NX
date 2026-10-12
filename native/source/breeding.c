@@ -28,6 +28,7 @@ typedef struct {
 typedef struct {
     BreedPlan plan;
     int missing, total;
+    int first_ready, first_stock, first_items, stock_used;
 } Eval;
 typedef struct {
     const BreedState *state;
@@ -89,6 +90,67 @@ static BreedParent buildNatured(Build *build, const unsigned char *order, unsign
     BreedParent second = buildPlain(build, order, count);
     return addStep(build, first, (int)BREED_ITEMS - 1, second, order[count - 1], order, count, true);
 }
+// Reorder independent breeds around the inventory, not just the recursive build order.
+// Only steps whose offspring dependencies are already scheduled can move forward.
+// Reserving each held item as a step is scheduled also makes the "have" flags
+// describe the *new* queue instead of the original tree traversal.
+static void prioritize(const BreedState *state, BreedPlan *plan) {
+    BreedStep queued[BREED_STEPS];
+    bool scheduled[BREED_STEPS] = {false};
+    int new_index[BREED_STEPS];
+    int items[BREED_ITEMS];
+    memcpy(items, state->have, sizeof(items));
+
+    for (unsigned pos = 0; pos < plan->count; ++pos) {
+        int chosen = -1;
+        int best_missing = 5, best_owned = -1, best_items = -1;
+        for (unsigned i = 0; i < plan->count; ++i) {
+            if (scheduled[i]) continue;
+            const BreedStep *step = &plan->steps[i];
+            bool blocked = false;
+            int owned = 0, missing = 0;
+            for (unsigned j = 0; j < 2; ++j) {
+                if (step->parent[j].kind == 2 && !scheduled[step->parent[j].ref]) blocked = true;
+                if (step->parent[j].kind == 1) owned++;
+                if (step->parent[j].kind == 0) missing++;
+            }
+            if (blocked) continue;
+
+            int remaining[BREED_ITEMS];
+            memcpy(remaining, items, sizeof(remaining));
+            int available = 0;
+            for (unsigned j = 0; j < 2; ++j) {
+                int item = step->item[j];
+                if (remaining[item] > 0) remaining[item]--, available++;
+            }
+            missing += 2 - available;
+            // A fully stocked breed comes first; among equal shortages prefer
+            // parents already owned over ones that still need to be acquired.
+            if (chosen < 0 || missing < best_missing ||
+                (missing == best_missing && owned > best_owned) ||
+                (missing == best_missing && owned == best_owned && available > best_items)) {
+                chosen = (int)i;
+                best_missing = missing;
+                best_owned = owned;
+                best_items = available;
+            }
+        }
+        // The generated plan is a DAG; there is always an eligible step.
+        if (chosen < 0) return;
+        scheduled[chosen] = true;
+        new_index[chosen] = (int)pos;
+        BreedStep step = plan->steps[chosen];
+        for (unsigned j = 0; j < 2; ++j) {
+            if (step.parent[j].kind == 2) step.parent[j].ref = new_index[step.parent[j].ref];
+            int item = step.item[j];
+            step.have[j] = items[item] > 0;
+            if (step.have[j]) items[item]--;
+        }
+        queued[pos] = step;
+    }
+    memcpy(plan->steps, queued, plan->count * sizeof(queued[0]));
+}
+
 static void evaluate(const BreedState *state, const unsigned char *order, unsigned count, Eval *eval) {
     Build build = {state, &eval->plan, {false}};
     memset(eval->plan.need, 0, sizeof(eval->plan.need));
@@ -97,24 +159,35 @@ static void evaluate(const BreedState *state, const unsigned char *order, unsign
         buildNatured(&build, order, count);
     else
         buildPlain(&build, order, count);
-    int left[BREED_ITEMS];
-    memcpy(left, state->have, sizeof(left));
+    prioritize(state, &eval->plan);
+
     eval->missing = eval->total = 0;
+    eval->stock_used = 0;
     for (unsigned i = 0; i < eval->plan.count; ++i)
         for (unsigned j = 0; j < 2; ++j) {
-            BreedStep *step = &eval->plan.steps[i];
-            int item = step->item[j];
-            eval->plan.need[item]++;
+            const BreedStep *step = &eval->plan.steps[i];
+            eval->plan.need[step->item[j]]++;
             eval->total++;
-            if (left[item] > 0)
-                left[item]--, step->have[j] = true;
-            else
-                step->have[j] = false, eval->missing++;
+            if (!step->have[j]) eval->missing++;
+            if (step->parent[j].kind == 1) eval->stock_used++;
         }
+    eval->first_ready = eval->first_stock = eval->first_items = 0;
+    if (eval->plan.count) {
+        const BreedStep *first = &eval->plan.steps[0];
+        for (unsigned j = 0; j < 2; ++j) {
+            if (first->parent[j].kind == 1) eval->first_stock++;
+            if (first->have[j]) eval->first_items++;
+        }
+        eval->first_ready = eval->first_stock == 2 && eval->first_items == 2;
+    }
 }
 static bool better(const Eval *a, const Eval *b) {
     if (a->missing != b->missing) return a->missing < b->missing;
     if (a->plan.count != b->plan.count) return a->plan.count < b->plan.count;
+    if (a->first_ready != b->first_ready) return a->first_ready > b->first_ready;
+    if (a->first_stock != b->first_stock) return a->first_stock > b->first_stock;
+    if (a->first_items != b->first_items) return a->first_items > b->first_items;
+    if (a->stock_used != b->stock_used) return a->stock_used > b->stock_used;
     return a->total < b->total;
 }
 // Every order of the stats is tried (the first pass finds the shortest route, the second keeps the best one within 3 breeds of it).
@@ -172,6 +245,12 @@ void breedPlan(const BreedState *state, BreedPlan *plan) {
     }
     *plan = search.best.plan;
     plan->extra = (int)plan->count - search.shortest;
+}
+void breedShoppingList(const BreedState *state, const BreedPlan *plan, int to_buy[BREED_ITEMS]) {
+    for (unsigned i = 0; i < BREED_ITEMS; ++i) {
+        int available = state->have[i] > 0 ? state->have[i] : 0;
+        to_buy[i] = plan->need[i] > available ? plan->need[i] - available : 0;
+    }
 }
 static void append(char *out, size_t size, const char *format, ...) __attribute__((format(printf, 3, 4)));
 static void append(char *out, size_t size, const char *format, ...) {
