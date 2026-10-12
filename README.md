@@ -37,7 +37,7 @@ In the breeding planner: **D-pad** navigates, **A** confirms or completes a step
 
 ## Install and game files
 
-Follow the [upstream setup guide](https://github.com/Petit-Prince-dev/PokeMMO-NX#readme) for client setup and game-file requirements. NXpanded uses these SD-card locations:
+NXpanded uses these SD-card locations:
 
 ```text
 /switch/PokeMMO-NXpanded/
@@ -79,8 +79,6 @@ The native build outputs `PokeMMO.nro`. To test the portable breeding planner wi
 ```bash
 ./tools/test_breeding.sh
 ```
-
-GitHub Actions also builds tagged releases; see [Releases](https://github.com/TomSellecksMustache/PokeMMO-NXpanded/releases) for downloadable builds.
 
 ## Design and limitations
 
