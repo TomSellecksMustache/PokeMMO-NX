@@ -5,6 +5,7 @@
 #include "linux_audio.h"
 #include "linux_file_picker.h"
 #include "linux_roadmap.h"
+#include "linux_roadmap_shortcuts.h"
 #include "linux_format.h"
 #include "linux_threads.h"
 #include "linux_sdl_cursor.h"
@@ -509,15 +510,16 @@ static void applySizeRequest(void) {
 static bool sdlGlSwapWindow(void *window) {
     (void)window;
     if (egl_display == EGL_NO_DISPLAY || egl_surface == EGL_NO_SURFACE) return false;
+    unsigned w, h;
+    screenSize(&w, &h);
     if (linuxFilePickerOpen() || linuxRoadmapOpen()) {
-        unsigned w, h;
-        screenSize(&w, &h);
         linuxFilePickerDraw(w, h);
     } else {
-        unsigned w, h;
-        screenSize(&w, &h);
+        // Toasts are HUD-only: keep the cursor (and all normal game rendering) operating.
         linuxSdlCursorDraw(w, h);
-    }  // the file chooser or the cursor, over the frame just drawn
+        if (linuxRoadmapToastOpacity(armTicksToNs(armGetSystemTick())) > 0.0f)
+            linuxFilePickerDraw(w, h);
+    }
     bool ok = eglSwapBuffers(egl_display, egl_surface);
     if (ok) applySizeRequest();
     unsigned frame = atomic_fetch_add(&frame_counter, 1) + 1;
@@ -570,13 +572,13 @@ static void pumpInput(void) {
         // Clicking the right stick brings the keyboard up or down, by hand, whatever the game is doing: the game's own requests for text
         // input are not followed (they only came for some fields).
         bool keyboard_button = snapshot.gamepad && ((snapshot.buttons >> 8) & 1u);  // SDL_GAMEPAD_BUTTON_RIGHT_STICK
-        bool with_r = keyboard_button && ((snapshot.buttons >> 10) & 1u);
-        bool roadmap_button = with_r && ((snapshot.buttons >> 14) & 1u); // R + right + R3: main roadmap
-        bool shopping_button = with_r && !roadmap_button && ((snapshot.buttons >> 13) & 1u); // R + left + R3: shopping
-        if (roadmap_button && !keyboard_button_before)
+        LinuxRoadmapShortcut shortcut = linuxRoadmapShortcut(snapshot.buttons);
+        if (keyboard_button && !keyboard_button_before && shortcut == ROADMAP_SHORTCUT_MAIN)
             linuxRoadmapShow();
-        else if (shopping_button && !keyboard_button_before)
+        else if (keyboard_button && !keyboard_button_before && shortcut == ROADMAP_SHORTCUT_SHOPPING)
             linuxRoadmapShowShopping();
+        else if (keyboard_button && !keyboard_button_before && shortcut == ROADMAP_SHORTCUT_TOAST)
+            linuxRoadmapToastShow(snapshot.timestamp_ns);
         else if (keyboard_button && !keyboard_button_before && linuxSdlInputKeyboardAvailable()) {
             bool show = !linuxSdlInputKeyboardVisible();
             trace("sdl.keyboard.toggle show=%d", show);

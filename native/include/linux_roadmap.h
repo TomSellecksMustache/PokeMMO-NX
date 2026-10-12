@@ -1,6 +1,7 @@
 #pragma once
 #include "linux_sdl_events.h"
 #include <stdbool.h>
+#include <stdint.h>
 
 // The breeding roadmap, drawn over the game like the file chooser: R + D-pad right + right stick opens it. The target, the items and the Pokemon
 // the player owns are set in the roadmap itself (+) and kept in switch/PokeMMO/breeding.csv. It shows the next breed and updates the file as breeds are done.
@@ -10,7 +11,10 @@ typedef void (*LinuxRoadmapText)(float x, float y, const char *string, unsigned 
 
 // Used by the SDL layer.
 void linuxRoadmapShow(void);
-void linuxRoadmapShowShopping(void);  // R + D-pad left + R3: read-only purchases for the active goal                               // loads the file and opens the roadmap
+void linuxRoadmapShowShopping(void);  // R + D-pad left + R3: read-only purchases for the active goal
+void linuxRoadmapToastShow(uint64_t now_ns); // R + D-pad up + R3: non-modal progress, no keyboard, no input capture
+float linuxRoadmapToastOpacity(uint64_t now_ns); // fade linearly from 1 to 0 over 10 seconds
+void linuxRoadmapToastDraw(LinuxRoadmapRect rect, LinuxRoadmapText text, float opacity);                               // loads the file and opens the roadmap
 bool linuxRoadmapOpen(void);                               // it is on the screen
 bool linuxRoadmapCapturesInput(void);                      // it is open, or its closing buttons have not been released yet
 void linuxRoadmapFeed(const LinuxInputSnapshot *snapshot);  // the sampled controller, while it captures it

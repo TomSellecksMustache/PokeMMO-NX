@@ -477,9 +477,10 @@ static void rect(float x, float y, float w, float h, float r, float g, float b, 
     gl.Vertex2f(x, y + h);
     gl.End();
 }
+static float overlay_text_opacity = 1.0f; // only the non-modal toast fades text
 static void text(float x, float y, const char *string, unsigned max_chars, float r, float g, float b) {
     gl.Enable(GL_TEXTURE_2D);
-    gl.Color4f(r, g, b, 1.0f);
+    gl.Color4f(r, g, b, overlay_text_opacity);
     gl.Begin(GL_QUADS);
     x -= 4.0f * SCALE;  // the glyphs leave the first four pixels of their cell empty
     for (unsigned i = 0; string[i] && i < max_chars; ++i, x += ADVANCE) {
@@ -549,8 +550,10 @@ static void drawPanel(void) {  // lock held
     }
 }
 void linuxFilePickerDraw(unsigned width, unsigned height) {
-    bool roadmap = !atomic_load(&active) && linuxRoadmapOpen();  // the breeding roadmap draws with the same state and font
-    if ((!atomic_load(&active) && !roadmap) || atomic_load(&draw_failed)) return;
+    bool picker_open = atomic_load(&active);
+    bool roadmap = !picker_open && linuxRoadmapOpen();
+    float toast_opacity = !picker_open && !roadmap ? linuxRoadmapToastOpacity(armTicksToNs(armGetSystemTick())) : 0.0f;
+    if ((!picker_open && !roadmap && toast_opacity <= 0.0f) || atomic_load(&draw_failed)) return;
     GLint program = 0, framebuffer = 0;
     if (!gl_ready) {
         if (!loadGl()) {
@@ -585,8 +588,13 @@ void linuxFilePickerDraw(unsigned width, unsigned height) {
         createFontTexture();
     else
         gl.BindTexture(GL_TEXTURE_2D, font_texture);
+    overlay_text_opacity = 1.0f;
     if (roadmap) {
         linuxRoadmapDraw(rect, text);
+    } else if (toast_opacity > 0.0f) {
+        overlay_text_opacity = toast_opacity;
+        linuxRoadmapToastDraw(rect, text, toast_opacity);
+        overlay_text_opacity = 1.0f;
     } else {
         lock();
         drawPanel();
