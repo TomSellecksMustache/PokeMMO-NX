@@ -15,6 +15,7 @@ A fork of [PokeMMO-NX](https://github.com/Petit-Prince-dev/PokeMMO-NX) by Petit-
 Say which Pokémon you want (species, nature, stats at 31) and what you own (Power items, Everstones, Pokémon). It plans every breed and shows you the **next step** over the game. Mark a step done and your stock and items update.
 
 - **Smart plans:** uses your recorded Pokémon and items, and accepts up to 3 extra breeds if that saves buying items.
+- **Quick HUD toast:** R + D-pad up + R3 shows the goal, next pair, held items, and remaining step count. It fades out over 10 seconds; movement, gameplay, and the regular R3 keyboard shortcut otherwise continue normally.
 - **Shopping list:** R + D-pad left + R3 opens a read-only checklist of missing Power items and Everstones for the entire active goal (required minus owned).
 - **Stock-first queue:** independent steps using owned parents and held items move ahead of steps needing new purchases, without skipping prerequisite breeds. The next-step screen reports stock coverage and the full queue marks fully stocked steps with `*`.
 - **Set up on the console:** type the species with the console keyboard (the list narrows as you type); set nature, stats, items and stock with the D-pad.
@@ -28,6 +29,7 @@ Say which Pokémon you want (species, nature, stats at 31) and what you own (Pow
 | -------------------- | --------------------- |
 | R + D-pad right + R3 | Open the main overlay |
 | R + D-pad left + R3  | Show goal shopping list |
+| R + D-pad up + R3    | 10-second non-modal progress toast |
 | A                    | Done (asks first)     |
 | Y / X                | Items / all steps     |
 | + / −                | Setup / chains        |

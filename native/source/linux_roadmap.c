@@ -14,6 +14,7 @@
 #define TEXT_X 56.0f
 #define COLUMNS 55u  // what fits in a panel at the font's size
 #define LIST_ROWS 14
+#define TOAST_DURATION_NS 10000000000ull
 // SDL gamepad buttons
 #define BTN_A (1u << 0)
 #define BTN_B (1u << 1)
@@ -48,6 +49,7 @@ static char filter[24];  // what was typed of the species
 static int match[700], matches;  // the species that begin with it: indexes, -1 for "none"
 static uint64_t typing_since, quiet_until;
 static atomic_bool active, hold, fresh;
+static atomic_ullong toast_since; // 0 when dismissed; never captures game input
 static atomic_flag guard = ATOMIC_FLAG_INIT;
 static void lock(void) {
     while (atomic_flag_test_and_set_explicit(&guard, memory_order_acquire)) {}
@@ -152,6 +154,7 @@ static void openChains(View back) {
 }
 static void show(View initial) {
     lock();
+    atomic_store(&toast_since, 0); // full-screen view takes precedence over a pending toast
     memset(&state, 0, sizeof(state));
     state.nature = state.left = -1;
     if (!breedLoad(FILE_PATH, &state)) breedLoad(FILE_PATH ".tmp", &state);  // the temporary file is what is left if the console went off while saving
@@ -166,6 +169,22 @@ static void show(View initial) {
 }
 void linuxRoadmapShow(void) { show(VIEW_NEXT); }
 void linuxRoadmapShowShopping(void) { show(VIEW_SHOPPING); }
+void linuxRoadmapToastShow(uint64_t now_ns) {
+    // No game memory or network access: the saved, manually entered breeding.csv is the sole input.
+    // Called only while the modal roadmap and file picker are inactive.
+    lock();
+    memset(&state, 0, sizeof(state));
+    state.nature = state.left = -1;
+    if (!breedLoad(FILE_PATH, &state)) breedLoad(FILE_PATH ".tmp", &state);
+    refresh();
+    atomic_store(&toast_since, now_ns ? now_ns : 1);
+    unlock();
+}
+float linuxRoadmapToastOpacity(uint64_t now_ns) {
+    uint64_t since = atomic_load(&toast_since);
+    if (!since || now_ns < since || now_ns - since >= TOAST_DURATION_NS) return 0.0f;
+    return 1.0f - (float)(now_ns - since) / (float)TOAST_DURATION_NS;
+}
 bool linuxRoadmapOpen(void) { return atomic_load(&active); }
 bool linuxRoadmapCapturesInput(void) { return atomic_load(&active) || atomic_load(&hold); }
 
@@ -586,6 +605,38 @@ static void drawChains(void) {
         y = 650;
         line(&y, notice, 1.0f, 0.45f, 0.4f);
     }
+}
+// Small, translucent HUD: render thread draws it *after* the game and its cursor. No view change or control capture.
+// The renderer applies `opacity` to text (the text callback is also used by the full-screen roadmap).
+void linuxRoadmapToastDraw(LinuxRoadmapRect rect, LinuxRoadmapText text, float opacity) {
+    if (opacity <= 0.0f) return;
+    lock();
+    char buf[160], first[100], second[100];
+    const float x = 278.0f, y = 22.0f, w = 974.0f, h = 254.0f, tx = x + 22.0f;
+    rect(x - 3, y - 3, w + 6, h + 6, 0.35f, 0.75f, 0.45f, opacity);
+    rect(x, y, w, h, 0.04f, 0.07f, 0.06f, 0.94f * opacity);
+    text(tx, y + 13, "BreedMark - Quick progress", 43, 1.0f, 0.85f, 0.3f);
+    snprintf(buf, sizeof(buf), "Goal: %.23s   |   %u step%s remaining", state.species[0] ? state.species : "(not set)", plan.count, plan.count == 1 ? "" : "s");
+    text(tx, y + 45, buf, 43, 0.7f, 0.85f, 0.75f);
+    if (problem || !plan.count) {
+        text(tx, y + 88, problem ? problem : "Goal complete. No more breeds needed.", 43, 1.0f, 1.0f, 1.0f);
+        text(tx, y + 187, "This toast fades away while the game keeps running.", 43, 0.7f, 0.85f, 0.75f);
+    } else {
+        const BreedStep *step = &plan.steps[0];
+        breedLabel(&state, &plan, step->parent[0], first, sizeof(first));
+        breedLabel(&state, &plan, step->parent[1], second, sizeof(second));
+        snprintf(buf, sizeof(buf), "Breed: %.37s", first);
+        text(tx, y + 77, buf, 43, 1.0f, 1.0f, 1.0f);
+        snprintf(buf, sizeof(buf), "With:  %.37s", second);
+        text(tx, y + 107, buf, 43, 1.0f, 1.0f, 1.0f);
+        snprintf(buf, sizeof(buf), "Item 1: %s [%s]", BREED_ITEM_NAMES[step->item[0]], step->have[0] ? "have" : "need");
+        text(tx, y + 141, buf, 43, step->have[0] ? 0.55f : 1.0f, step->have[0] ? 1.0f : 0.5f, 0.6f);
+        snprintf(buf, sizeof(buf), "Item 2: %s [%s]", BREED_ITEM_NAMES[step->item[1]], step->have[1] ? "have" : "need");
+        text(tx, y + 171, buf, 43, step->have[1] ? 0.55f : 1.0f, step->have[1] ? 1.0f : 0.5f, 0.6f);
+        snprintf(buf, sizeof(buf), "%u after this breed   |   Your controls remain active", plan.count - 1);
+        text(tx, y + 205, buf, 43, 0.7f, 0.85f, 0.75f);
+    }
+    unlock();
 }
 void linuxRoadmapDraw(LinuxRoadmapRect rect, LinuxRoadmapText text) {
     drawRect = rect;
