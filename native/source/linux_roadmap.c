@@ -27,7 +27,7 @@
 #define BTN_DOWN (1u << 12)
 #define BTN_LEFT (1u << 13)
 #define BTN_RIGHT (1u << 14)
-typedef enum { VIEW_NEXT, VIEW_CONFIRM, VIEW_STEPS, VIEW_ITEMS, VIEW_SETUP, VIEW_STOCK, VIEW_EDIT, VIEW_PICK, VIEW_CHAINS } View;
+typedef enum { VIEW_NEXT, VIEW_CONFIRM, VIEW_STEPS, VIEW_ITEMS, VIEW_SETUP, VIEW_STOCK, VIEW_EDIT, VIEW_PICK, VIEW_CHAINS, VIEW_SHOPPING } View;
 typedef enum { ASK_DONE, ASK_REMOVE, ASK_CHAIN } Ask;
 typedef struct {
     int slot;
@@ -150,13 +150,13 @@ static void openChains(View back) {
     listChains();
     view = VIEW_CHAINS;
 }
-void linuxRoadmapShow(void) {
+static void show(View initial) {
     lock();
     memset(&state, 0, sizeof(state));
     state.nature = state.left = -1;
     if (!breedLoad(FILE_PATH, &state)) breedLoad(FILE_PATH ".tmp", &state);  // the temporary file is what is left if the console went off while saving
     refresh();
-    view = problem ? VIEW_SETUP : VIEW_NEXT;  // the first time there is no target yet: it starts with the setup
+    view = initial == VIEW_SHOPPING ? VIEW_SHOPPING : (problem ? VIEW_SETUP : VIEW_NEXT);  // an unset goal may still show its empty shopping list
     form = VIEW_SETUP;
     scroll = row = item_row = 0;
     atomic_store(&fresh, true);
@@ -164,6 +164,8 @@ void linuxRoadmapShow(void) {
     atomic_store(&active, true);
     unlock();
 }
+void linuxRoadmapShow(void) { show(VIEW_NEXT); }
+void linuxRoadmapShowShopping(void) { show(VIEW_SHOPPING); }
 bool linuxRoadmapOpen(void) { return atomic_load(&active); }
 bool linuxRoadmapCapturesInput(void) { return atomic_load(&active) || atomic_load(&hold); }
 
@@ -297,6 +299,8 @@ static void press(uint32_t pressed) {  // lock held; SDL gamepad buttons
         } else if (pressed & (BTN_A | BTN_B)) {
             view = ask == ASK_DONE ? VIEW_NEXT : (ask == ASK_CHAIN ? VIEW_CHAINS : VIEW_EDIT);
         }
+    } else if (view == VIEW_SHOPPING) {
+        if (pressed & BTN_B) atomic_store(&active, false);
     } else if (view == VIEW_STEPS) {
         scroll += ((pressed & BTN_DOWN) ? 1 : 0) - ((pressed & BTN_UP) ? 1 : 0) + ((pressed & BTN_R) ? 10 : 0) - ((pressed & BTN_L) ? 10 : 0);
         scroll = scroll < 0 ? 0 : (scroll > steps - 1 ? (steps > 0 ? steps - 1 : 0) : scroll);
@@ -398,13 +402,19 @@ static void drawNext(void) {
     const BreedStep *step = &plan.steps[0];
     snprintf(text, sizeof(text), "Next step - %s   (%u more after this)", state.species, plan.count - 1);
     line(&y, text, 1.0f, 0.85f, 0.3f);
+    unsigned owned_parents = 0, owned_items = 0;
     for (unsigned i = 0; i < 2; ++i) {
         breedLabel(&state, &plan, step->parent[i], label, sizeof(label));
         snprintf(text, sizeof(text), "%s  %s", i ? "With  " : "Breed ", label);
         line(&y, text, 1.0f, 1.0f, 1.0f);
         snprintf(text, sizeof(text), "holding %s  [%s]", BREED_ITEM_NAMES[step->item[i]], step->have[i] ? "have" : "need");
         line(&y, text, step->have[i] ? 0.5f : 1.0f, step->have[i] ? 1.0f : 0.45f, step->have[i] ? 0.6f : 0.4f);
+        if (step->parent[i].kind == 1) owned_parents++;
+        if (step->have[i]) owned_items++;
     }
+    snprintf(text, sizeof(text), "Logged stock: %u/2 Pokemon, %u/2 items%s", owned_parents, owned_items,
+             owned_parents == 2 && owned_items == 2 ? "  [STOCK READY]" : "");
+    line(&y, text, 0.7f, 0.85f, 0.75f);
     breedResult(&state, step, label, sizeof(label));
     snprintf(text, sizeof(text), "Makes  %s", label);
     line(&y, text, 0.6f, 0.85f, 1.0f);
@@ -429,7 +439,7 @@ static void drawSteps(void) {
     char text[200], first[40], second[40];
     float y = 34;
     panel(30, 20, 1220, 680);
-    snprintf(text, sizeof(text), "All steps (%u)   [Up/Down] scroll   [B] back", plan.count);
+    snprintf(text, sizeof(text), "All steps (%u)   * = stock ready   [B] back", plan.count);
     line(&y, text, 1.0f, 0.85f, 0.3f);
     for (unsigned i = (unsigned)scroll; i < plan.count && y < 670; ++i) {
         BreedParent parent[2] = {plan.steps[i].parent[0], plan.steps[i].parent[1]};
@@ -442,9 +452,45 @@ static void drawSteps(void) {
         }
         char result[96];
         breedResult(&state, &plan.steps[i], result, sizeof(result));
-        snprintf(text, sizeof(text), "R%u %s: %s + %s", i + 1, result, first, second);
+        bool stock_ready = parent[0].kind == 1 && parent[1].kind == 1 && plan.steps[i].have[0] && plan.steps[i].have[1];
+        snprintf(text, sizeof(text), "R%u%s %s: %s + %s", i + 1, stock_ready ? "*" : "", result, first, second);
         line(&y, text, i == 0 ? 0.6f : 1.0f, i == 0 ? 0.85f : 1.0f, 1.0f);
     }
+}
+// Read-only list for the whole remaining chain, using the exact same green/dark palette as the roadmap.
+static void drawShopping(void) {
+    char text[160];
+    float y = 34;
+    int purchases[BREED_ITEMS], total = 0, kinds = 0, owned = 0, required = 0;
+    breedShoppingList(&state, &plan, purchases);
+    panel(30, 20, 1220, 680);
+    snprintf(text, sizeof(text), "Shopping list - %s   [B] close", state.species[0] ? state.species : "no active goal");
+    line(&y, text, 1.0f, 0.85f, 0.3f);
+    y += ROW;
+    if (problem) {
+        line(&y, problem, 1.0f, 0.45f, 0.4f);
+        line(&y, "Set a goal with R + D-pad right + R3, then [+] Setup.", 0.7f, 0.8f, 0.75f);
+        return;
+    }
+    snprintf(text, sizeof(text), "%u breeding steps remaining  |  Item requirements for the full goal", plan.count);
+    line(&y, text, 0.7f, 0.85f, 0.75f);
+    y += ROW;
+    for (unsigned i = 0; i < BREED_ITEMS; ++i) {
+        int have = state.have[i] > 0 ? state.have[i] : 0;
+        int used = have < plan.need[i] ? have : plan.need[i];
+        required += plan.need[i];
+        owned += used;
+        total += purchases[i];
+        if (!purchases[i]) continue;
+        kinds++;
+        snprintf(text, sizeof(text), "%-15s BUY %2d     need %2d   have %2d", BREED_ITEM_NAMES[i], purchases[i], plan.need[i], have);
+        line(&y, text, 1.0f, 1.0f, 1.0f);
+    }
+    if (!kinds) line(&y, "All required items are already in your recorded stock.", 0.5f, 1.0f, 0.6f);
+    y = 606;
+    snprintf(text, sizeof(text), "To buy: %d items   |   In stock: %d/%d   |   %d item types missing", total, owned, required, kinds);
+    line(&y, text, total ? 1.0f : 0.5f, total ? 0.85f : 1.0f, 0.3f + (total ? 0.0f : 0.3f));
+    line(&y, "Uses manually entered inventory; update it in the main roadmap.", 0.7f, 0.8f, 0.75f);
 }
 static void drawItems(void) {
     char text[160];
@@ -545,7 +591,9 @@ void linuxRoadmapDraw(LinuxRoadmapRect rect, LinuxRoadmapText text) {
     drawRect = rect;
     drawText = text;
     lock();
-    if (view == VIEW_STEPS)
+    if (view == VIEW_SHOPPING)
+        drawShopping();
+    else if (view == VIEW_STEPS)
         drawSteps();
     else if (view == VIEW_ITEMS)
         drawItems();

@@ -570,9 +570,13 @@ static void pumpInput(void) {
         // Clicking the right stick brings the keyboard up or down, by hand, whatever the game is doing: the game's own requests for text
         // input are not followed (they only came for some fields).
         bool keyboard_button = snapshot.gamepad && ((snapshot.buttons >> 8) & 1u);  // SDL_GAMEPAD_BUTTON_RIGHT_STICK
-        bool roadmap_button = keyboard_button && ((snapshot.buttons >> 10) & 1u) && ((snapshot.buttons >> 14) & 1u);  // with R and D-pad right: the breeding roadmap
+        bool with_r = keyboard_button && ((snapshot.buttons >> 10) & 1u);
+        bool roadmap_button = with_r && ((snapshot.buttons >> 14) & 1u); // R + right + R3: main roadmap
+        bool shopping_button = with_r && !roadmap_button && ((snapshot.buttons >> 13) & 1u); // R + left + R3: shopping
         if (roadmap_button && !keyboard_button_before)
             linuxRoadmapShow();
+        else if (shopping_button && !keyboard_button_before)
+            linuxRoadmapShowShopping();
         else if (keyboard_button && !keyboard_button_before && linuxSdlInputKeyboardAvailable()) {
             bool show = !linuxSdlInputKeyboardVisible();
             trace("sdl.keyboard.toggle show=%d", show);
