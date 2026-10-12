@@ -2,114 +2,94 @@
 
 # PokeMMO-NXpanded
 
-<img width="2306" height="1289" alt="PokeMMO-NXpanded screenshot" src="https://github.com/user-attachments/assets/43bf8dd0-27b0-4c9e-ba1a-d19e941da828" />
+![NXpanded running PokeMMO](https://github.com/user-attachments/assets/43bf8dd0-27b0-4c9e-ba1a-d19e941da828)
 
-A fork of [PokeMMO-NX](https://github.com/Petit-Prince-dev/PokeMMO-NX) by Petit-Prince-dev, which runs the official PokeMMO client on the Nintendo Switch. This fork is based on his version 1.1.4. For game setup, ROMs and launching, follow the [upstream README](https://github.com/Petit-Prince-dev/PokeMMO-NX#readme).
+**PokeMMO on Nintendo Switch, with practical in-game tools built for a controller.**
 
-**NXpanded includes a breeding overlay.** That is the reason for this fork. The goal is a small modular set of in-game helpers that make PokeMMO simpler to play on a console.
+NXpanded builds on [PokeMMO-NX](https://github.com/Petit-Prince-dev/PokeMMO-NX) by Petit-Prince-dev (originally forked from v1.1.4). It runs the official PokeMMO client and adds a breeding planner, shopping list, quick progress display, and optional graphics filters.
 
-> Unofficial project, not affiliated with PokeMMO or Nintendo.
+> Unofficial project. Not affiliated with PokeMMO or Nintendo.
 
-## Breeding overlay
+## Features
 
-Say which Pokémon you want (species, nature, stats at 31) and what you own (Power items, Everstones, Pokémon). It plans every breed and shows you the **next step** over the game. Mark a step done and your stock and items update.
+- **Breeding planner:** Choose a species, nature, and target 31 IVs. See the full breeding chain and what to do next.
+- **Inventory-aware queue:** Enter the Pokémon and held items you own. Ready-to-complete breeds take priority without breaking dependencies; the planner also looks for opportunities to save items.
+- **Shopping list:** See which Power items and Everstones you still need for the current goal, after subtracting recorded stock.
+- **Quick progress toast:** Check your goal, next parents, held items, and remaining steps without leaving gameplay. The toast fades after 10 seconds.
+- **Saved projects:** Switch between breeding chains and return later. Species and egg-group data cover Generations 1–5 (649 species).
+- **Visual Enhancements:** Optional colour grading, vignette, pixel softening, tilt-shift blur, and bloom in a two-tab, controller-only menu. All effects start off.
+- **Readable overlays:** Text wraps when possible; long single-line fields scroll to the end and smoothly reverse. Destructive actions require confirmation.
 
-- **Smart plans:** uses your recorded Pokémon and items, and accepts up to 3 extra breeds if that saves buying items.
-- **Quick HUD toast:** R + D-pad up + R3 shows the goal, next pair, held items, and remaining step count. It fades out over 10 seconds; movement, gameplay, and the regular R3 keyboard shortcut otherwise continue normally.
-- **Visual Enhancements (experimental):** R + D-pad down + R3 opens a controller-only two-tab menu with five independent ON/OFF settings. Use **L/R** to cycle tabs, **D-pad up/down** to select, **A** to toggle, and **B** to close. Tab 1 (Colour & finish) offers colour grading and vignette; tab 2 (Soft focus) contains softened pixels, tilt-shift blur, and bloom. All default OFF and save to the SD card. NXpanded's shader processes only the displayed game frame; NXpanded's overlays are drawn afterward. Game UI may also be filtered. On shader initialization failure the original frame remains visible.
-- **Shopping list:** R + D-pad left + R3 opens a read-only checklist of missing Power items and Everstones for the entire active goal (required minus owned).
-- **Stock-first queue:** independent steps using owned parents and held items move ahead of steps needing new purchases, without skipping prerequisite breeds. The next-step screen reports stock coverage and the full queue marks fully stocked steps with `*`.
-- **Set up on the console:** type the species with the console keyboard (the list narrows as you type); set nature, stats, items and stock with the D-pad.
-- **Breeding chains:** put one project aside, start another, and come back later. Nothing is lost.
-- **Egg groups:** all 649 species of generations 1 to 5, built in.
-- **Safe:** anything destructive asks first, with No selected by default.
+**Inventory is entered manually.** NXpanded does not read Pokémon or items from the running game.
 
-### Controls
+## Controls
 
-| Button               | Does                  |
-| -------------------- | --------------------- |
-| R + D-pad right + R3 | Open the main overlay |
-| R + D-pad left + R3  | Show goal shopping list |
-| R + D-pad up + R3    | 10-second non-modal progress toast |
-| R + D-pad down + R3  | Visual Enhancements: L/R tabs, D-pad select, A toggle, B close |
-| A                    | Done (asks first)     |
-| Y / X                | Items / all steps     |
-| + / −                | Setup / chains        |
-| B                    | Back, close           |
+| Shortcut | Action |
+|---|---|
+| **R + D-pad Right + R3** | Breeding planner |
+| **R + D-pad Left + R3** | Shopping list |
+| **R + D-pad Up + R3** | 10-second progress toast |
+| **R + D-pad Down + R3** | Visual Enhancements |
 
-### Visual-enhancements note
+In the breeding planner: **D-pad** navigates, **A** confirms or completes a step, **B** goes back, **Y** shows items, **X** shows all steps, **+** opens setup, and **−** opens saved chains. In Visual Enhancements: **L/R** changes tabs, **D-pad Up/Down** selects, **A** toggles, and **B** closes.
 
-The experimental filter is optional, OFF by default and not hardware-benchmarked. It uses an OpenGL 2.1 / GLSL 1.20 single-pass fullscreen presentation shader after PokeMMO finishes drawing, before NXpanded draws its overlays. This does **not** alter the Java client, but the captured game image includes its own HUD, text and menus. All five effects may be independently combined. If the graphics shader is unsupported the renderer bypasses it. Benchmark on real hardware before publishing production builds.
+**No touchscreen required.** Launch in Switch application mode.
 
-This development iteration builds on the **v1.2.0 feature set** (shopping list, stock-first queue and progress toast); it is **not** a new v1.2.0 production release. Do not overwrite the existing `v1.2.0-NXpanded` Git tag.
+## Install and game files
 
-The menu is intentionally small: **Tab 1 = Colour grading, Vignette** (low-cost adjustments); **Tab 2 = Soften pixels, Tilt-shift blur, Soft bloom** (more texture samples). All five switches remain independent and there are no touch-only actions. Shoulder buttons cycle in either direction, with the selection resetting to the first effect when a tab changes. While the menu is open, controller input is captured by NXpanded; it is returned to the game after the menu is closed and the buttons are released.
+Follow the [upstream setup guide](https://github.com/Petit-Prince-dev/PokeMMO-NX#readme) for client setup and game-file requirements. NXpanded uses these SD-card locations:
 
-**Not included deliberately:** cinematic bokeh/depth-of-field and full-resolution multi-pass blur (potentially large performance costs on the original Switch); ray tracing, SSAO or real depth effects (no depth/normal information in the captured image, and unsuitable GPU cost); AI upscaling (no dedicated tensor hardware); film grain, CRT scanlines, chromatic aberration and similar novelty effects (clutter without supporting the chosen soft look). FXAA, sharpening and a full preset/slider system are deferred until Switch measurements show a clear benefit worth the extra complexity. No FPS impact is guaranteed without physical Switch benchmarks.
+```text
+/switch/PokeMMO-NXpanded/
+├── isolate-root/game/
+│   ├── roms/               # Required game ROMs
+│   └── data/mods/          # PokeMMO mods
+├── breeding.csv            # Recorded stock and breeding data
+├── chains/                 # Saved breeding projects
+└── visual-effects.cfg      # Optional graphics settings
+```
 
-### Your data
+If upgrading from an older build, copy any files you want to keep from `/switch/PokeMMO/` to their matching locations under `/switch/PokeMMO-NXpanded/`. Files are **not** migrated automatically.
 
-Your data is plain text on the SD card. **Stock is entered manually** in the overlay; it never reads the game client or automatically discovers in-game Pokémon or items:
+## Build from source
 
-- `switch/PokeMMO/breeding.csv`
-- `switch/PokeMMO/chains/`
-- `switch/PokeMMO/visual-effects.cfg` (optional visual settings)
+Install [Docker](https://www.docker.com/) or [Podman](https://podman.io/), then clone this repository:
 
-### Design rule
+```bash
+git clone https://github.com/TomSellecksMustache/PokeMMO-NXpanded.git
+cd PokeMMO-NXpanded
+```
 
-The overlay only draws its own pixels and reads the controller input the loader already has. It never touches the game client, its memory or network, and never sends input to the game. That is a design rule, not a guarantee.
+Build with devkitPro's container (run from the repository root):
 
-## Build instructions
-
-To ensure a consistent and reproducible build environment across all operating systems (Windows, macOS, and Linux), I recommend building the project in a container.
-
-### Prerequisites
-
-You must have either [Docker](https://www.docker.com/) or [Podman](https://podman.io/) installed on your system.
-
-### Building the project
-
-Run the following command from the **root directory** of this repository. It mounts your current folder into the official devkitPro container and compiles the project.
-
-**Docker (Windows, macOS, most Linux):**
+**Docker**
 
 ```bash
 docker run --rm -v "${PWD}":/work -w /work/native devkitpro/devkita64 make -j2
 ```
 
-**Podman (Fedora, RHEL, CentOS):**
+**Podman**
 
 ```bash
 podman run --rm -v "${PWD}":/work -w /work/native docker.io/devkitpro/devkita64 make -j2
 ```
 
-### Test the breeding planner without a Switch
+The native build outputs `PokeMMO.nro`. To test the portable breeding planner without a Switch:
 
-```sh
+```bash
 ./tools/test_breeding.sh
 ```
 
-This checks that owned Pokémon and held items are prioritized, that dependent breeds remain in order, and that stock and item quantities are consumed only once. It compiles the portable planner on your computer; it does not produce an `.nro`.
+GitHub Actions also builds tagged releases; see [Releases](https://github.com/TomSellecksMustache/PokeMMO-NXpanded/releases) for downloadable builds.
 
-### Launching
+## Design and limitations
 
-Launch in application mode and press **R + D-pad right + R3**.
+NXpanded's helpers live in the native Switch layer. They do not modify the PokeMMO Java client, inspect game memory, or communicate with game servers. Graphics effects process the displayed frame, so PokeMMO's own HUD may be filtered too. Their performance has not been fully benchmarked on Switch hardware.
 
-## Limits
+Visual settings are intended to persist on the SD card; some 1.3.0 builds may report a save error, which still needs a verified hardware fix. Species support currently covers Generations 1–5. Check PokeMMO's rules before using third-party tools.
 
-- Species are generations 1 to 5. Egg groups come from PokeAPI and differ from older data on a few species (Ralts and Trapinch lines).
-- I can't say how PokeMMO's team views third-party tools. Read their rules and use this at your own risk.
+## Credits and license
 
-## License and credits
+Based on [PokeMMO-NX](https://github.com/Petit-Prince-dev/PokeMMO-NX) by **Petit-Prince-dev**. Egg-group data: [PokeAPI](https://github.com/PokeAPI/pokeapi). NXpanded development and publishing: **WyzeCorp**.
 
-MIT, see `LICENSE`. Original copyright: Petit_Prince. Additions in this fork are also MIT.
-
-Third-party libraries: see `THIRD-PARTY-NOTICES.md`.
-
-Thanks to Petit-Prince-dev for PokeMMO-NX, the PokeMMO team for the game, and [PokeAPI](https://github.com/PokeAPI/pokeapi) for the egg-group data.
-
-### SD-card installation location
-
-NXpanded loads its game client, ROMs and mods from `switch/PokeMMO-NXpanded/isolate-root/game/`. Place ROMs in `switch/PokeMMO-NXpanded/isolate-root/game/roms/` and game mods in `switch/PokeMMO-NXpanded/isolate-root/game/data/mods/` where supported by the PokeMMO client. Previous `switch/PokeMMO/` data is **not** automatically migrated or deleted; copy the files you wish to retain to the matching new folder before launch. NXpanded saves its breeding files and chains under `switch/PokeMMO-NXpanded/`.
-
-All NXpanded menu text is clipped to its drawing window. Explanatory rows wrap when room permits; longer single-line fields use a slow, pausing, reversible marquee without a jump. This applies to the breeding, shopping, toast and file-picker overlays. No touchscreen is required.
+MIT licensed; see [LICENSE](LICENSE) and [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for copyright and third-party attribution.
