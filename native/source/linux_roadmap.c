@@ -1,13 +1,14 @@
 #include "linux_roadmap.h"
 #include "breeding.h"
 #include "linux_sdl_input.h"
+#include "nxpanded_text.h"
 #include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
 
-#define FILE_PATH "sdmc:/switch/PokeMMO/breeding.csv"  // the chain being worked on
-#define CHAIN_DIR "sdmc:/switch/PokeMMO/chains"         // the ones put aside, a file each
+#define FILE_PATH "sdmc:/switch/PokeMMO-NXpanded/breeding.csv"  // the chain being worked on
+#define CHAIN_DIR "sdmc:/switch/PokeMMO-NXpanded/chains"         // the ones put aside, a file each
 #define CHAIN_PATH CHAIN_DIR "/c%02d.csv"
 #define CHAINS 32
 #define ROW 30.0f
@@ -394,11 +395,33 @@ void linuxRoadmapFeed(const LinuxInputSnapshot *s) {
 // ---- drawing: the file chooser's rectangles and text, in a 1280x720 view -----------------------------------------------------------
 static LinuxRoadmapRect drawRect;
 static LinuxRoadmapText drawText;
+static LinuxRoadmapClip drawClip;
 static void line(float *y, const char *string, float r, float g, float b) {
-    drawText(TEXT_X, *y, string, COLUMNS, r, g, b);
-    *y += ROW;
+    // Wrap prose at word boundaries while there is room in the current panel.
+    // Rows without remaining vertical space fall back to the clipped, bouncing
+    // marquee handled by the shared font renderer, never draw off-window.
+    const char *at = string;
+    while (*at) {
+        size_t length = strlen(at);
+        if (length > COLUMNS && *y + 2.0f * ROW <= 683.0f) {
+            size_t take = nxTextWrapLine(at, COLUMNS);
+            char segment[COLUMNS + 1u];
+            memcpy(segment, at, take);
+            segment[take] = 0;
+            drawText(TEXT_X, *y, segment, COLUMNS, r, g, b);
+            *y += ROW;
+            at += take;
+            while (*at == ' ' || *at == '\t') ++at;
+        } else {
+            drawText(TEXT_X, *y, at, COLUMNS, r, g, b);
+            *y += ROW;
+            break;
+        }
+    }
+    if (!*string) *y += ROW;
 }
 static void panel(float x, float y, float w, float h) {
+    if (drawClip) drawClip(x + 10.0f, y + 7.0f, w - 20.0f, h - 14.0f);
     drawRect(x - 3, y - 3, w + 6, h + 6, 0.35f, 0.75f, 0.45f, 1.0f);
     drawRect(x, y, w, h, 0.04f, 0.07f, 0.06f, 0.94f);
 }
@@ -608,14 +631,15 @@ static void drawChains(void) {
 }
 // Small, translucent HUD: render thread draws it *after* the game and its cursor. No view change or control capture.
 // The renderer applies `opacity` to text (the text callback is also used by the full-screen roadmap).
-void linuxRoadmapToastDraw(LinuxRoadmapRect rect, LinuxRoadmapText text, float opacity) {
+void linuxRoadmapToastDraw(LinuxRoadmapRect rect, LinuxRoadmapText text, LinuxRoadmapClip clip, float opacity) {
     if (opacity <= 0.0f) return;
     lock();
     char buf[160], first[100], second[100];
     const float x = 278.0f, y = 22.0f, w = 974.0f, h = 254.0f, tx = x + 22.0f;
+    if (clip) clip(x + 12.0f, y + 6.0f, w - 24.0f, h - 12.0f);
     rect(x - 3, y - 3, w + 6, h + 6, 0.35f, 0.75f, 0.45f, opacity);
     rect(x, y, w, h, 0.04f, 0.07f, 0.06f, 0.94f * opacity);
-    text(tx, y + 13, "BreedMark - Quick progress", 43, 1.0f, 0.85f, 0.3f);
+    text(tx, y + 13, "NXpanded - Quick progress", 43, 1.0f, 0.85f, 0.3f);
     snprintf(buf, sizeof(buf), "Goal: %.23s   |   %u step%s remaining", state.species[0] ? state.species : "(not set)", plan.count, plan.count == 1 ? "" : "s");
     text(tx, y + 45, buf, 43, 0.7f, 0.85f, 0.75f);
     if (problem || !plan.count) {
@@ -638,9 +662,10 @@ void linuxRoadmapToastDraw(LinuxRoadmapRect rect, LinuxRoadmapText text, float o
     }
     unlock();
 }
-void linuxRoadmapDraw(LinuxRoadmapRect rect, LinuxRoadmapText text) {
+void linuxRoadmapDraw(LinuxRoadmapRect rect, LinuxRoadmapText text, LinuxRoadmapClip clip) {
     drawRect = rect;
     drawText = text;
+    drawClip = clip;
     lock();
     if (view == VIEW_SHOPPING)
         drawShopping();
