@@ -28,7 +28,7 @@
 #include <switch.h>
 
 // The client sees this folder as "/": its install is /game, its temporary files /tmp, its home /home/switch.
-#define ROOT_DIR "sdmc:/switch/PokeMMO/isolate-root"
+#define ROOT_DIR "sdmc:/switch/PokeMMO-NXpanded/isolate-root"
 #define STACK_BYTES (16u * 1024u * 1024u)
 #define LINE_BYTES 240u
 #define CLOSE_GRACE_MS 8000u  // after the system asks the application to close, the client gets this long to finish before it is left behind

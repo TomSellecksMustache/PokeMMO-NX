@@ -12,7 +12,7 @@
 extern void __libnx_exit(int result) __attribute__((noreturn));
 extern u32 __nx_applet_exit_mode;
 
-#define ROOT "sdmc:/switch/PokeMMO"
+#define ROOT "sdmc:/switch/PokeMMO-NXpanded"
 // The client install folder as the game expects it (bin/linux/arm64/PokeMMO, data/, config/ ...), inside the files root.
 #define CLIENT_PATH ROOT "/isolate-root/game/bin/linux/arm64/PokeMMO"
 // Diagnostics are off unless this file exists; they are then written to the log below.
@@ -29,7 +29,7 @@ static void showMessage(const char *text) {
     padInitializeDefault(&pad);
     consoleClear();
     printf("\n\n   PokeMMO\n\n   %s\n\n   Press + to quit.\n\n", text);
-    printf("   For a diagnostics log, create an empty file named debug.enabled in\n   switch/PokeMMO on the SD card, restart, then read diagnostics.log.\n");
+    printf("   For a diagnostics log, create an empty file named debug.enabled in\n   switch/PokeMMO-NXpanded on the SD card, restart, then read diagnostics.log.\n");
     consoleUpdate(NULL);
     while (appletMainLoop()) {
         padUpdate(&pad);
@@ -61,7 +61,7 @@ int main(int argc, char **argv) {
     if (appletGetAppletType() != AppletType_Application)
         showMessage("Applet mode: not enough memory. Restart hbmenu while holding R when launching a game (application mode).");
     else if (stat(CLIENT_PATH, &info) != 0)
-        showMessage("The PokeMMO client was not found in switch/PokeMMO/isolate-root/game.");
+        showMessage("The PokeMMO client was not found in switch/PokeMMO-NXpanded/isolate-root/game.");
     else {
         // The game draws through EGL on the console's window. The text console is created and released once before it takes over: that is
         // the sequence validated on the Switch, and it leaves the window in the state Mesa expects (only a blank frame is drawn).

@@ -94,3 +94,9 @@ MIT, see `LICENSE`. Original copyright: Petit_Prince. Additions in this fork are
 Third-party libraries: see `THIRD-PARTY-NOTICES.md`.
 
 Thanks to Petit-Prince-dev for PokeMMO-NX, the PokeMMO team for the game, and [PokeAPI](https://github.com/PokeAPI/pokeapi) for the egg-group data.
+
+### SD-card installation location
+
+NXpanded loads its game client, ROMs and mods from `switch/PokeMMO-NXpanded/isolate-root/game/`. Place ROMs in `switch/PokeMMO-NXpanded/isolate-root/game/roms/` and game mods in `switch/PokeMMO-NXpanded/isolate-root/game/data/mods/` where supported by the PokeMMO client. Previous `switch/PokeMMO/` data is **not** automatically migrated or deleted; copy the files you wish to retain to the matching new folder before launch. NXpanded saves its breeding files and chains under `switch/PokeMMO-NXpanded/`.
+
+All NXpanded menu text is clipped to its drawing window. Explanatory rows wrap when room permits; longer single-line fields use a slow, pausing, reversible marquee without a jump. This applies to the breeding, shopping, toast and file-picker overlays. No touchscreen is required.
