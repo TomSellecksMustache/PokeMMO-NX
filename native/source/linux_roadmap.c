@@ -2,6 +2,8 @@
 #include "breeding.h"
 #include "linux_sdl_input.h"
 #include "nxpanded_text.h"
+#include "linux_visual_effects.h"
+#include "linux_visual_menu.h"
 #include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
@@ -29,7 +31,7 @@
 #define BTN_DOWN (1u << 12)
 #define BTN_LEFT (1u << 13)
 #define BTN_RIGHT (1u << 14)
-typedef enum { VIEW_NEXT, VIEW_CONFIRM, VIEW_STEPS, VIEW_ITEMS, VIEW_SETUP, VIEW_STOCK, VIEW_EDIT, VIEW_PICK, VIEW_CHAINS, VIEW_SHOPPING } View;
+typedef enum { VIEW_NEXT, VIEW_CONFIRM, VIEW_STEPS, VIEW_ITEMS, VIEW_SETUP, VIEW_STOCK, VIEW_EDIT, VIEW_PICK, VIEW_CHAINS, VIEW_SHOPPING, VIEW_VISUAL } View;
 typedef enum { ASK_DONE, ASK_REMOVE, ASK_CHAIN } Ask;
 typedef struct {
     int slot;
@@ -43,7 +45,8 @@ static char eggs[64];
 static View view, form, items_back, chains_back;  // form: the setup or edit view that the species picker returns to
 static Ask ask;
 static bool yes, pick_none, typing, quiet;  // typing: the console's keyboard is up for the species; quiet: it just left, the buttons it was given back with do not count
-static int scroll, row, item_row, stock_row, edit, pick, chain_row, chain_count;
+static int scroll, row, item_row, stock_row, edit, pick, chain_row, chain_count, visual_row, visual_tab;
+static const char *visual_notice;
 static Chain chains[CHAINS];
 static const char *notice;  // why the last thing in the chains list did not happen
 static char filter[24];  // what was typed of the species
@@ -160,9 +163,10 @@ static void show(View initial) {
     state.nature = state.left = -1;
     if (!breedLoad(FILE_PATH, &state)) breedLoad(FILE_PATH ".tmp", &state);  // the temporary file is what is left if the console went off while saving
     refresh();
-    view = initial == VIEW_SHOPPING ? VIEW_SHOPPING : (problem ? VIEW_SETUP : VIEW_NEXT);  // an unset goal may still show its empty shopping list
+    view = initial == VIEW_SHOPPING || initial == VIEW_VISUAL ? initial : (problem ? VIEW_SETUP : VIEW_NEXT);  // an unset goal may still show its empty shopping list
     form = VIEW_SETUP;
-    scroll = row = item_row = 0;
+    scroll = row = item_row = visual_row = visual_tab = 0;
+    visual_notice = NULL;
     atomic_store(&fresh, true);
     atomic_store(&hold, true);
     atomic_store(&active, true);
@@ -170,6 +174,7 @@ static void show(View initial) {
 }
 void linuxRoadmapShow(void) { show(VIEW_NEXT); }
 void linuxRoadmapShowShopping(void) { show(VIEW_SHOPPING); }
+void linuxRoadmapShowVisual(void) { show(VIEW_VISUAL); }
 void linuxRoadmapToastShow(uint64_t now_ns) {
     // No game memory or network access: the saved, manually entered breeding.csv is the sole input.
     // Called only while the modal roadmap and file picker are inactive.
@@ -318,6 +323,31 @@ static void press(uint32_t pressed) {  // lock held; SDL gamepad buttons
             }
         } else if (pressed & (BTN_A | BTN_B)) {
             view = ask == ASK_DONE ? VIEW_NEXT : (ask == ASK_CHAIN ? VIEW_CHAINS : VIEW_EDIT);
+        }
+    } else if (view == VIEW_VISUAL) {
+        if (pressed & BTN_B) { // B always closes, never toggles an effect
+            atomic_store(&active, false);
+            return;
+        }
+        // Shoulder buttons cycle tabs in either direction; a simultaneous L+R is ignored.
+        if (!!(pressed & BTN_L) != !!(pressed & BTN_R)) {
+            visual_tab = (visual_tab + ((pressed & BTN_R) ? 1 : LINUX_VISUAL_TABS - 1)) % LINUX_VISUAL_TABS;
+            visual_row = 0; // avoid accidentally toggling a different row after switching tabs
+            visual_notice = NULL;
+            return; // a shoulder press cannot also change a setting in the new tab
+        }
+        visual_row += !!(pressed & BTN_DOWN) - !!(pressed & BTN_UP);
+        if (visual_row < 0) visual_row = 0;
+        if ((unsigned)visual_row >= linuxVisualMenuRows((unsigned)visual_tab))
+            visual_row = (int)linuxVisualMenuRows((unsigned)visual_tab) - 1;
+        if (pressed & BTN_A) {
+            unsigned effect = linuxVisualMenuEffect((unsigned)visual_tab, (unsigned)visual_row);
+            if (effect < VISUAL_EFFECT_COUNT) {
+                if (!linuxVisualEffectToggle(effect))
+                    visual_notice = "Setting changed; could not save to the SD card.";
+                else
+                    visual_notice = NULL;
+            }
         }
     } else if (view == VIEW_SHOPPING) {
         if (pressed & BTN_B) atomic_store(&active, false);
@@ -534,6 +564,43 @@ static void drawShopping(void) {
     line(&y, text, total ? 1.0f : 0.5f, total ? 0.85f : 1.0f, 0.3f + (total ? 0.0f : 0.3f));
     line(&y, "Uses manually entered inventory; update it in the main roadmap.", 0.7f, 0.8f, 0.75f);
 }
+static void drawVisual(void) {
+    char label[150];
+    const unsigned tab = (unsigned)visual_tab;
+    panel(150, 40, 980, 615);
+    drawText(180, 64, "NXpanded - Visual Enhancements", 45, 1.0f, 0.85f, 0.3f);
+    // Both tabs are always visible and selected with L/R, not touch.
+    for (unsigned t = 0; t < LINUX_VISUAL_TABS; ++t) {
+        const float x = t == 0 ? 171.0f : 635.0f;
+        const bool current = t == tab;
+        drawRect(x, 114, 455, 49, current ? 0.19f : 0.08f, current ? 0.39f : 0.15f,
+                 current ? 0.28f : 0.12f, 1.0f);
+        drawText(x + 14, 126, t == 0 ? "1  Colour & finish" : "2  Soft focus", 22,
+                 current ? 1.0f : 0.68f, current ? 0.95f : 0.75f, current ? 0.5f : 0.7f);
+    }
+    drawText(180, 188, tab == 0 ? "Low-cost everyday effects" : "Higher GPU cost - try one at a time", 49,
+             0.7f, 0.85f, 0.75f);
+    for (unsigned i = 0; i < linuxVisualMenuRows(tab); ++i) {
+        const unsigned effect = linuxVisualMenuEffect(tab, i);
+        const bool enabled = linuxVisualEffectEnabled(effect);
+        const float y = 247.0f + 69.0f * i;
+        if ((int)i == visual_row) drawRect(172, y - 9, 926, 52, 0.20f, 0.40f, 0.30f, 1.0f);
+        snprintf(label, sizeof(label), "%s    [ %s ]", linuxVisualEffectName(effect), enabled ? "ON " : "OFF");
+        drawText(198, y, label, 43, enabled ? 0.55f : 1.0f,
+                 enabled ? 1.0f : 0.85f, enabled ? 0.6f : 0.65f);
+    }
+    unsigned selected = linuxVisualMenuEffect(tab, (unsigned)visual_row);
+    drawText(180, 467, linuxVisualMenuDescription(selected), 50, 0.75f, 0.90f, 0.78f);
+    drawText(180, 507, "[L/R] tabs   [Up/Down] select   [A] toggle   [B] close", 52, 1.0f, 1.0f, 1.0f);
+    int status = linuxVisualEffectsStatus();
+    const char *message = status < 0 ? "Shader unavailable: game image unaffected."
+                          : status > 0 ? "Shader ready (effects only when enabled)."
+                                       : "Shader loads when an effect is enabled.";
+    drawText(180, 553, message, 48, status < 0 ? 1.0f : 0.7f,
+             status < 0 ? 0.5f : 0.85f, 0.6f);
+    drawText(180, 594, visual_notice ? visual_notice : "Saved: switch/PokeMMO-NXpanded/visual-effects.cfg", 49,
+             visual_notice ? 1.0f : 0.7f, visual_notice ? 0.5f : 0.85f, 0.75f);
+}
 static void drawItems(void) {
     char text[160];
     float y = 34;
@@ -667,7 +734,9 @@ void linuxRoadmapDraw(LinuxRoadmapRect rect, LinuxRoadmapText text, LinuxRoadmap
     drawText = text;
     drawClip = clip;
     lock();
-    if (view == VIEW_SHOPPING)
+    if (view == VIEW_VISUAL)
+        drawVisual();
+    else if (view == VIEW_SHOPPING)
         drawShopping();
     else if (view == VIEW_STEPS)
         drawSteps();

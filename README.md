@@ -6,7 +6,7 @@
 
 A fork of [PokeMMO-NX](https://github.com/Petit-Prince-dev/PokeMMO-NX) by Petit-Prince-dev, which runs the official PokeMMO client on the Nintendo Switch. This fork is based on his version 1.1.4. For game setup, ROMs and launching, follow the [upstream README](https://github.com/Petit-Prince-dev/PokeMMO-NX#readme).
 
-**I've added a breeding overlay.** That is the reason for this fork. The goal is a small modular set of in-game helpers that make PokeMMO simpler to play on a console.
+**NXpanded includes a breeding overlay.** That is the reason for this fork. The goal is a small modular set of in-game helpers that make PokeMMO simpler to play on a console.
 
 > Unofficial project, not affiliated with PokeMMO or Nintendo.
 
@@ -16,6 +16,7 @@ Say which Pokémon you want (species, nature, stats at 31) and what you own (Pow
 
 - **Smart plans:** uses your recorded Pokémon and items, and accepts up to 3 extra breeds if that saves buying items.
 - **Quick HUD toast:** R + D-pad up + R3 shows the goal, next pair, held items, and remaining step count. It fades out over 10 seconds; movement, gameplay, and the regular R3 keyboard shortcut otherwise continue normally.
+- **Visual Enhancements (experimental):** R + D-pad down + R3 opens a controller-only two-tab menu with five independent ON/OFF settings. Use **L/R** to cycle tabs, **D-pad up/down** to select, **A** to toggle, and **B** to close. Tab 1 (Colour & finish) offers colour grading and vignette; tab 2 (Soft focus) contains softened pixels, tilt-shift blur, and bloom. All default OFF and save to the SD card. NXpanded's shader processes only the displayed game frame; NXpanded's overlays are drawn afterward. Game UI may also be filtered. On shader initialization failure the original frame remains visible.
 - **Shopping list:** R + D-pad left + R3 opens a read-only checklist of missing Power items and Everstones for the entire active goal (required minus owned).
 - **Stock-first queue:** independent steps using owned parents and held items move ahead of steps needing new purchases, without skipping prerequisite breeds. The next-step screen reports stock coverage and the full queue marks fully stocked steps with `*`.
 - **Set up on the console:** type the species with the console keyboard (the list narrows as you type); set nature, stats, items and stock with the D-pad.
@@ -30,10 +31,21 @@ Say which Pokémon you want (species, nature, stats at 31) and what you own (Pow
 | R + D-pad right + R3 | Open the main overlay |
 | R + D-pad left + R3  | Show goal shopping list |
 | R + D-pad up + R3    | 10-second non-modal progress toast |
+| R + D-pad down + R3  | Visual Enhancements: L/R tabs, D-pad select, A toggle, B close |
 | A                    | Done (asks first)     |
 | Y / X                | Items / all steps     |
 | + / −                | Setup / chains        |
 | B                    | Back, close           |
+
+### Visual-enhancements note
+
+The experimental filter is optional, OFF by default and not hardware-benchmarked. It uses an OpenGL 2.1 / GLSL 1.20 single-pass fullscreen presentation shader after PokeMMO finishes drawing, before NXpanded draws its overlays. This does **not** alter the Java client, but the captured game image includes its own HUD, text and menus. All five effects may be independently combined. If the graphics shader is unsupported the renderer bypasses it. Benchmark on real hardware before publishing production builds.
+
+This development iteration builds on the **v1.2.0 feature set** (shopping list, stock-first queue and progress toast); it is **not** a new v1.2.0 production release. Do not overwrite the existing `v1.2.0-NXpanded` Git tag.
+
+The menu is intentionally small: **Tab 1 = Colour grading, Vignette** (low-cost adjustments); **Tab 2 = Soften pixels, Tilt-shift blur, Soft bloom** (more texture samples). All five switches remain independent and there are no touch-only actions. Shoulder buttons cycle in either direction, with the selection resetting to the first effect when a tab changes. While the menu is open, controller input is captured by NXpanded; it is returned to the game after the menu is closed and the buttons are released.
+
+**Not included deliberately:** cinematic bokeh/depth-of-field and full-resolution multi-pass blur (potentially large performance costs on the original Switch); ray tracing, SSAO or real depth effects (no depth/normal information in the captured image, and unsuitable GPU cost); AI upscaling (no dedicated tensor hardware); film grain, CRT scanlines, chromatic aberration and similar novelty effects (clutter without supporting the chosen soft look). FXAA, sharpening and a full preset/slider system are deferred until Switch measurements show a clear benefit worth the extra complexity. No FPS impact is guaranteed without physical Switch benchmarks.
 
 ### Your data
 
@@ -41,6 +53,7 @@ Your data is plain text on the SD card. **Stock is entered manually** in the ove
 
 - `switch/PokeMMO/breeding.csv`
 - `switch/PokeMMO/chains/`
+- `switch/PokeMMO/visual-effects.cfg` (optional visual settings)
 
 ### Design rule
 
