@@ -8,7 +8,10 @@ trap 'rm -f "$output"' EXIT HUP INT TERM
     native/source/breeding.c native/tests/test_breeding_priority.c -o "$output"
 "$output"
 "${CC:-cc}" -std=c11 -O2 -Wall -Wextra -Werror -I native/include \
-    native/source/breeding.c native/source/linux_roadmap.c native/source/nxpanded_text.c native/tests/test_roadmap_toast.c -lm -o "$output"
+    native/source/breeding.c native/source/linux_roadmap.c native/source/nxpanded_text.c native/source/linux_visual_settings.c native/tests/test_roadmap_toast.c -lm -o "$output"
+"$output"
+"${CC:-cc}" -std=c11 -O2 -Wall -Wextra -Werror -I native/include \
+    native/source/linux_visual_settings.c native/tests/test_visual_settings.c -o "$output"
 "$output"
 
 "${CC:-cc}" -std=c11 -O2 -Wall -Wextra -Werror -I native/include \

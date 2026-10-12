@@ -9,9 +9,9 @@ include $(DEVKITPRO)/libnx/switch_rules
 
 # The application, as the console shows it (stored in the .nacp file; the icon is a 256x256 JPEG).
 TARGET      := PokeMMO
-APP_TITLE   := PokeMMO
-APP_AUTHOR  := Petit_Prince
-APP_VERSION := 1.2.1
+APP_TITLE   := NXpanded
+APP_AUTHOR  := WyzeCorp
+APP_VERSION := 1.3.0
 ICON        := icon.jpg
 
 BUILD    := build

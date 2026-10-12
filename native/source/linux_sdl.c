@@ -6,6 +6,7 @@
 #include "linux_file_picker.h"
 #include "linux_roadmap.h"
 #include "linux_roadmap_shortcuts.h"
+#include "linux_visual_effects.h"
 #include "linux_format.h"
 #include "linux_threads.h"
 #include "linux_sdl_cursor.h"
@@ -512,6 +513,7 @@ static bool sdlGlSwapWindow(void *window) {
     if (egl_display == EGL_NO_DISPLAY || egl_surface == EGL_NO_SURFACE) return false;
     unsigned w, h;
     screenSize(&w, &h);
+    linuxVisualEffectsRender(w, h); // post-process only the game, before the native overlays
     if (linuxFilePickerOpen() || linuxRoadmapOpen()) {
         linuxFilePickerDraw(w, h);
     } else {
@@ -579,12 +581,22 @@ static void pumpInput(void) {
             linuxRoadmapShowShopping();
         else if (keyboard_button && !keyboard_button_before && shortcut == ROADMAP_SHORTCUT_TOAST)
             linuxRoadmapToastShow(snapshot.timestamp_ns);
+        else if (keyboard_button && !keyboard_button_before && shortcut == ROADMAP_SHORTCUT_VISUAL)
+            linuxRoadmapShowVisual();
         else if (keyboard_button && !keyboard_button_before && linuxSdlInputKeyboardAvailable()) {
             bool show = !linuxSdlInputKeyboardVisible();
             trace("sdl.keyboard.toggle show=%d", show);
             linuxSdlInputKeyboardRequest(show);
         }
         keyboard_button_before = keyboard_button;
+        if (linuxRoadmapCapturesInput()) {
+            // This opening chord belongs to the native menu, not to the game.
+            LinuxInputSnapshot idle = {0};
+            idle.gamepad = snapshot.gamepad;
+            idle.timestamp_ns = snapshot.timestamp_ns;
+            linuxSdlEventsUpdate(&idle);
+            return;
+        }
         snapshot.buttons &= ~(1u << 8);  // the keyboard's button is not also a game button
         padMirrorsStick(&snapshot);
         unsigned width, height;
@@ -1057,6 +1069,7 @@ bool linuxSdlReset(void) {
         if (egl_surface != EGL_NO_SURFACE && !eglDestroySurface(egl_display, egl_surface)) ok = false;
         if (!eglTerminate(egl_display)) ok = false;
     }
+    linuxVisualEffectsReset();
     egl_display = EGL_NO_DISPLAY;
     egl_surface = EGL_NO_SURFACE;
     egl_context = EGL_NO_CONTEXT;
