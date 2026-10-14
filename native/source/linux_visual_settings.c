@@ -11,11 +11,13 @@
 static const char *const names[VISUAL_EFFECT_COUNT] = {
     "Tilt-shift blur", "Soft bloom", "Colour grading", "Soften pixels", "Vignette",
     "Edge smoothing", "Vibrance", "Contrast", "Highlight rolloff", "Edge sharpening",
-    "Shadow depth", "Atmospheric haze"
+    "Shadow depth", "Atmospheric haze",
+    "Wide cinematic glow", "Cinematic focus", "Painterly smoothing"
 };
 static const char *const keys[VISUAL_EFFECT_COUNT] = {
     "tilt_shift", "bloom", "color_grading", "soft_pixels", "vignette",
-    "fxaa", "vibrance", "contrast", "highlights", "sharpen", "shadows", "haze"
+    "fxaa", "vibrance", "contrast", "highlights", "sharpen", "shadows", "haze",
+    "wide_glow", "cinematic_focus", "painterly"
 };
 static atomic_uint enabled_mask;
 static atomic_bool loaded;

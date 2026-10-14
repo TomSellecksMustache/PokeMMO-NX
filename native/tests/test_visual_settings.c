@@ -16,6 +16,9 @@ int main(void) {
     assert(linuxVisualSettingsWrite(path, (1u << VISUAL_TILT_SHIFT) | (1u << VISUAL_VIGNETTE)));
     assert(linuxVisualSettingsRead(path, &got));
     assert(got == ((1u << VISUAL_TILT_SHIFT) | (1u << VISUAL_VIGNETTE)));
+    assert(linuxVisualSettingsWrite(path, (1u << VISUAL_WIDE_GLOW) | (1u << VISUAL_CINEMATIC_FOCUS) | (1u << VISUAL_PAINTERLY)));
+    assert(linuxVisualSettingsRead(path, &got));
+    assert(got == ((1u << VISUAL_WIDE_GLOW) | (1u << VISUAL_CINEMATIC_FOCUS) | (1u << VISUAL_PAINTERLY)));
     FILE *file = fopen(path, "wb");
     assert(file);
     assert(fputs("bloom=1\nignored=1\ncolor_grading=1\nbloom=0\nmalformed=foobar\n", file) >= 0);

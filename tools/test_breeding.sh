@@ -21,3 +21,6 @@ trap 'rm -f "$output"' EXIT HUP INT TERM
 "${CC:-cc}" -std=c11 -O2 -Wall -Wextra -Werror -I native/include \
     native/source/linux_sdl_filter.c native/tests/test_input_filter.c -o "$output"
 "$output"
+
+"${CC:-cc}" -std=c11 -O2 -Wall -Wextra -Werror -I native/include native/tests/test_hub_hold.c -o "$output"
+"$output"

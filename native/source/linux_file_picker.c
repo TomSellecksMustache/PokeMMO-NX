@@ -10,6 +10,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <switch.h>
+#include <ft2build.h>
+#include FT_FREETYPE_H
 
 extern const unsigned char default_font_bin[];  // libnx's console font: 256 glyphs of 16x16 pixels, a row is a 16-bit word, bit 15 is the left pixel
 
@@ -375,6 +377,7 @@ enum {
     GL_TEXTURE_WRAP_S = 0x2802,
     GL_TEXTURE_WRAP_T = 0x2803,
     GL_NEAREST = 0x2600,
+    GL_LINEAR = 0x2601,
     GL_CLAMP_TO_EDGE = 0x812F,
     GL_DEPTH_TEST = 0x0B71,
     GL_CULL_FACE = 0x0B44,
@@ -414,7 +417,84 @@ static struct {
 } gl;
 static bool gl_ready;
 static GLuint font_texture;
-static uint32_t atlas[256 * 256];
+static uint32_t atlas[768u * 336u];
+#define FONT_CELL 48u
+#define FONT_COLS 16u
+#define FONT_SLOTS 112u
+#define FONT_WIDTH (FONT_COLS * FONT_CELL)
+#define FONT_HEIGHT (7u * FONT_CELL)
+typedef struct {
+    unsigned codepoint;
+    float advance, left, top, width, height;
+    unsigned slot;
+} SmoothGlyph;
+static SmoothGlyph smooth_glyphs[FONT_SLOTS];
+static unsigned smooth_count;
+static bool smooth_font;
+static unsigned decodeUtf8(const char **cursor) {
+    const unsigned char *s = (const unsigned char *)*cursor;
+    unsigned ch = *s++;
+    if (ch >= 0xc2 && ch < 0xe0 && (*s & 0xc0) == 0x80) { ch = ((ch & 31u) << 6) | (*s++ & 63u); }
+    else if (ch >= 0xe0 && ch < 0xf0 && (s[0] & 0xc0) == 0x80 && (s[1] & 0xc0) == 0x80) {
+        ch = ((ch & 15u) << 12) | ((s[0] & 63u) << 6) | (s[1] & 63u); s += 2;
+    } else if (ch >= 0xf0 && ch < 0xf5 && (s[0] & 0xc0) == 0x80 && (s[1] & 0xc0) == 0x80 && (s[2] & 0xc0) == 0x80) {
+        ch = ((ch & 7u) << 18) | ((s[0] & 63u) << 12) | ((s[1] & 63u) << 6) | (s[2] & 63u); s += 3;
+    }
+    *cursor = (const char *)s;
+    return ch;
+}
+static const SmoothGlyph *lookupGlyph(unsigned cp) {
+    for (unsigned i = 0; i < smooth_count; ++i)
+        if (smooth_glyphs[i].codepoint == cp) return &smooth_glyphs[i];
+    return NULL;
+}
+static float measuredAdvance(const char *s) {
+    float result = 0;
+    while (*s) {
+        const unsigned cp = decodeUtf8(&s);
+        const SmoothGlyph *g = lookupGlyph(cp);
+        result += g ? g->advance : 14.0f;
+    }
+    return result;
+}
+// The OS supplies the font in memory; no copyrighted font bytes enter the repository or release.
+static bool buildSmoothAtlas(void) {
+    if (R_FAILED(plInitialize(PlServiceType_User))) return false;
+    PlFontData font;
+    bool good = false;
+    FT_Library library = NULL;
+    FT_Face face = NULL;
+    if (R_SUCCEEDED(plGetSharedFontByType(&font, PlSharedFontType_Standard)) &&
+        !FT_Init_FreeType(&library) &&
+        !FT_New_Memory_Face(library, (const FT_Byte *)font.address, (FT_Long)font.size, 0, &face) &&
+        !FT_Set_Pixel_Sizes(face, 0, 23)) {
+        memset(atlas, 0, sizeof(atlas));
+        smooth_count = 0;
+        for (unsigned cp = 32; cp <= 126; ++cp) {
+            if (FT_Load_Char(face, cp, FT_LOAD_RENDER)) continue;
+            FT_GlyphSlot glyph = face->glyph;
+            unsigned slot = smooth_count;
+            SmoothGlyph *out = &smooth_glyphs[smooth_count++];
+            *out = (SmoothGlyph){cp, (float)glyph->advance.x / 64.0f,
+                                 (float)glyph->bitmap_left, 26.0f - (float)glyph->bitmap_top,
+                                 (float)glyph->bitmap.width, (float)glyph->bitmap.rows, slot};
+            if (!out->advance) out->advance = 9.0f;
+            unsigned sx = slot % FONT_COLS * FONT_CELL;
+            unsigned sy = slot / FONT_COLS * FONT_CELL;
+            for (unsigned yy = 0; yy < glyph->bitmap.rows && yy < FONT_CELL; ++yy)
+                for (unsigned xx = 0; xx < glyph->bitmap.width && xx < FONT_CELL; ++xx) {
+                    unsigned a = glyph->bitmap.buffer[(int)yy * glyph->bitmap.pitch + xx];
+                    atlas[(sy + yy) * FONT_WIDTH + sx + xx] = (a << 24) | 0x00ffffffu;
+                }
+        }
+        good = smooth_count > 90;
+    }
+    if (face) FT_Done_Face(face);
+    if (library) FT_Done_FreeType(library);
+    plExit();
+    if (!good) smooth_count = 0;
+    return good;
+}
 
 static bool loadFunction(void *slot, const char *name) {
     void *address = (void *)eglGetProcAddress(name);
@@ -455,18 +535,24 @@ static bool loadGl(void) {
 }
 // Called with the game's OpenGL state saved: binds a new texture on the active unit.
 static void createFontTexture(void) {
-    for (unsigned code = 0; code < 256; ++code)
-        for (unsigned y = 0; y < 16; ++y) {
-            unsigned row = default_font_bin[code * 32 + y * 2] | ((unsigned)default_font_bin[code * 32 + y * 2 + 1] << 8);
-            for (unsigned x = 0; x < 16; ++x) atlas[((code / 16) * 16 + y) * 256 + (code % 16) * 16 + x] = (row >> (15 - x)) & 1u ? 0xFFFFFFFFu : 0x00FFFFFFu;
-        }
+    smooth_font = buildSmoothAtlas();
+    if (!smooth_font) {
+        for (unsigned code = 0; code < 256; ++code)
+            for (unsigned y = 0; y < 16; ++y) {
+                unsigned row = default_font_bin[code * 32 + y * 2] | ((unsigned)default_font_bin[code * 32 + y * 2 + 1] << 8);
+                for (unsigned x = 0; x < 16; ++x)
+                    atlas[((code / 16) * 16 + y) * 256 + (code % 16) * 16 + x] =
+                        (row >> (15 - x)) & 1u ? 0xFFFFFFFFu : 0x00FFFFFFu;
+            }
+    }
     gl.GenTextures(1, &font_texture);
     gl.BindTexture(GL_TEXTURE_2D, font_texture);
-    gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, smooth_font ? GL_LINEAR : GL_NEAREST);
+    gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, smooth_font ? GL_LINEAR : GL_NEAREST);
     gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 256, 256, 0, GL_RGBA, GL_UNSIGNED_BYTE, atlas);
+    const GLsizei fw = smooth_font ? FONT_WIDTH : 256, fh = smooth_font ? FONT_HEIGHT : 256;
+    gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, fw, fh, 0, GL_RGBA, GL_UNSIGNED_BYTE, atlas);
 }
 static void rect(float x, float y, float w, float h, float r, float g, float b, float a) {
     gl.Disable(GL_TEXTURE_2D);
@@ -501,7 +587,7 @@ static uint64_t marqueeHash(const char *s, float x, float y) {
     for (; *s; ++s) hash = (hash ^ (unsigned char)*s) * 1099511628211ull;
     return hash ? hash : 1;
 }
-static void text(float x, float y, const char *string, unsigned max_chars, float r, float g, float b) {
+static void textLegacy(float x, float y, const char *string, unsigned max_chars, float r, float g, float b) {
     if (!string || !*string || !max_chars) return;
     float left = x > clip_left ? x : clip_left;
     float right = x + (float)max_chars * ADVANCE;
@@ -533,11 +619,52 @@ static void text(float x, float y, const char *string, unsigned max_chars, float
     }
     gl.End();
 }
+static void text(float x, float y, const char *string, unsigned max_chars, float r, float g, float b) {
+    if (!smooth_font) { textLegacy(x, y, string, max_chars, r, g, b); return; }
+    if (!string || !*string || !max_chars) return;
+    float left = x > clip_left ? x : clip_left;
+    float right = x + (float)max_chars * ADVANCE;
+    if (right > clip_right) right = clip_right;
+    if (right <= left || y >= clip_bottom || y + 30 < clip_top) return;
+    const float width = measuredAdvance(string);
+    const uint64_t now = armTicksToNs(armGetSystemTick());
+    const uint64_t key = marqueeHash(string, x, y);
+    Marquee *entry = &marquees[key % MARQUEE_SLOTS];
+    if (entry->key != key || entry->start_ns > now) { entry->key = key; entry->start_ns = now; }
+    const float offset = nxTextMarqueePixels(width, right - x, now - entry->start_ns);
+    float pen = x - offset;
+    gl.Enable(GL_TEXTURE_2D);
+    gl.Color4f(r, g, b, overlay_text_opacity);
+    gl.Begin(GL_QUADS);
+    for (const char *at = string; *at;) {
+        const SmoothGlyph *glyph = lookupGlyph(decodeUtf8(&at));
+        if (!glyph) { pen += 14.0f; continue; }
+        const float gx = pen + glyph->left, gy = y + glyph->top;
+        float x0 = gx > left ? gx : left, y0 = gy > clip_top ? gy : clip_top;
+        float x1 = gx + glyph->width < right ? gx + glyph->width : right;
+        float y1 = gy + glyph->height < clip_bottom ? gy + glyph->height : clip_bottom;
+        if (x0 < x1 && y0 < y1) {
+            const float ax = (float)(glyph->slot % FONT_COLS * FONT_CELL);
+            const float ay = (float)(glyph->slot / FONT_COLS * FONT_CELL);
+            const float u0 = (ax + x0 - gx) / FONT_WIDTH, u1 = (ax + x1 - gx) / FONT_WIDTH;
+            const float v0 = (ay + y0 - gy) / FONT_HEIGHT, v1 = (ay + y1 - gy) / FONT_HEIGHT;
+            gl.TexCoord2f(u0, v0); gl.Vertex2f(x0, y0);
+            gl.TexCoord2f(u1, v0); gl.Vertex2f(x1, y0);
+            gl.TexCoord2f(u1, v1); gl.Vertex2f(x1, y1);
+            gl.TexCoord2f(u0, v1); gl.Vertex2f(x0, y1);
+        }
+        pen += glyph->advance;
+        if (pen > right + 50) break;
+    }
+    gl.End();
+}
+
 static void drawPanel(void) {  // lock held
     const unsigned columns = (unsigned)((PANEL_W - 56.0f) / ADVANCE);
     rect(0, 0, VIEW_WIDTH, VIEW_HEIGHT, 0.0f, 0.0f, 0.0f, picker.opaque ? 1.0f : 0.72f);
-    rect(PANEL_X - 3, PANEL_Y - 3, PANEL_W + 6, PANEL_H + 6, 0.55f, 0.55f, 0.55f, 1.0f);
-    rect(PANEL_X, PANEL_Y, PANEL_W, PANEL_H, 0.07f, 0.07f, 0.07f, 1.0f);
+    rect(PANEL_X - 2, PANEL_Y - 2, PANEL_W + 4, PANEL_H + 4, 0.43f, 0.75f, 0.82f, 1.0f);
+    rect(PANEL_X, PANEL_Y, PANEL_W, PANEL_H, 0.07f, 0.115f, 0.15f, 1.0f);
+    rect(PANEL_X, PANEL_Y, PANEL_W, 7, 0.47f, 0.82f, 0.87f, 1.0f);
     char line[PATH_BYTES + 64];
     text(TEXT_X, 46, picker.title[0] ? picker.title : "Choose", columns, 1.0f, 1.0f, 1.0f);
     if (picker.filter_count) {
@@ -545,7 +672,7 @@ static void drawPanel(void) {  // lock held
         text(PANEL_X + PANEL_W - 28.0f - ADVANCE * (float)strlen(line), 46, line, columns, 0.7f, 0.7f, 0.7f);
     }
     text(TEXT_X, 86, picker.folder, columns, 0.7f, 0.7f, 0.7f);
-    rect(PANEL_X + 20, 120, PANEL_W - 40, 2, 0.35f, 0.35f, 0.35f, 1.0f);
+    rect(PANEL_X + 20, 120, PANEL_W - 40, 2, 0.33f, 0.53f, 0.58f, 1.0f);
     if (picker.listing_failed)
         text(TEXT_X, LIST_TOP + 4, "This folder cannot be read (B: back)", columns, 0.9f, 0.9f, 0.9f);
     else if (!picker.count)
@@ -554,7 +681,7 @@ static void drawPanel(void) {  // lock held
         unsigned index = picker.first + row;
         const Entry *entry = &picker.entries[index];
         float y = LIST_TOP + (float)row * ROW_HEIGHT;
-        if (index == picker.selected) rect(PANEL_X + 14, y - 2, PANEL_W - 28, ROW_HEIGHT - 2, 0.3f, 0.3f, 0.3f, 1.0f);
+        if (index == picker.selected) rect(PANEL_X + 14, y - 2, PANEL_W - 28, ROW_HEIGHT - 2, 0.18f, 0.36f, 0.45f, 1.0f);
         snprintf(line, sizeof(line), "%s%s", entry->name, entry->directory && strcmp(entry->name, "..") ? "/" : "");
         if (entry->directory)
             text(TEXT_X, y + 1, line, columns, 1.0f, 1.0f, 1.0f);
@@ -565,14 +692,14 @@ static void drawPanel(void) {  // lock held
         snprintf(line, sizeof(line), "%u/%u", picker.selected + 1, picker.count);
         text(PANEL_X + PANEL_W - 28.0f - ADVANCE * (float)strlen(line), 86, line, columns, 0.7f, 0.7f, 0.7f);
     }
-    rect(PANEL_X + 20, 614, PANEL_W - 40, 2, 0.35f, 0.35f, 0.35f, 1.0f);
+    rect(PANEL_X + 20, 614, PANEL_W - 40, 2, 0.33f, 0.53f, 0.58f, 1.0f);
     text(TEXT_X, 626, "A open/pick  B back  X cancel", 31, 0.65f, 0.65f, 0.65f);
     snprintf(line, sizeof(line), "%s%sL/R page", picker.action != LINUX_PICKER_OPEN ? "Y folder  " : "", picker.filter_count > 1 ? "- filter  " : "");
     text(TEXT_X, 654, line, 31, 0.65f, 0.65f, 0.65f);
-    rect(CANCEL_X, BUTTON_Y, CANCEL_W, BUTTON_H, 0.22f, 0.22f, 0.22f, 1.0f);
+    rect(CANCEL_X, BUTTON_Y, CANCEL_W, BUTTON_H, 0.20f, 0.32f, 0.40f, 1.0f);
     text(CANCEL_X + (CANCEL_W - 6 * ADVANCE) / 2, BUTTON_Y + 11, "Cancel", 6, 1.0f, 1.0f, 1.0f);
     if (picker.action != LINUX_PICKER_OPEN) {
-        rect(CHOOSE_X, BUTTON_Y, CHOOSE_W, BUTTON_H, 0.38f, 0.38f, 0.38f, 1.0f);
+        rect(CHOOSE_X, BUTTON_Y, CHOOSE_W, BUTTON_H, 0.23f, 0.48f, 0.49f, 1.0f);
         text(CHOOSE_X + (CHOOSE_W - 15 * ADVANCE) / 2, BUTTON_Y + 11, "Use this folder", 15, 1.0f, 1.0f, 1.0f);
     }
 }

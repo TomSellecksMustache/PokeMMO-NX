@@ -12,8 +12,9 @@ typedef void (*LinuxRoadmapClip)(float x, float y, float w, float h);
 
 // Used by the SDL layer.
 void linuxRoadmapShow(void);
+void linuxRoadmapShowHub(void);
 void linuxRoadmapShowVisual(void); // R + D-pad down + R3: graphics options, non-client native menu
-void linuxRoadmapShowShopping(void);  // R + D-pad left + R3: read-only purchases for the active goal
+void linuxRoadmapShowShopping(void);  // R + D-pad left + R3: second tab of the main roadmap; opens Shopping directly
 void linuxRoadmapToastShow(uint64_t now_ns); // R + D-pad up + R3: non-modal progress, no keyboard, no input capture
 float linuxRoadmapToastOpacity(uint64_t now_ns); // fade linearly from 1 to 0 over 10 seconds
 void linuxRoadmapToastDraw(LinuxRoadmapRect rect, LinuxRoadmapText text, LinuxRoadmapClip clip, float opacity);                               // loads the file and opens the roadmap

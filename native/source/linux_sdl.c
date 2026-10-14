@@ -7,6 +7,8 @@
 #include "linux_roadmap.h"
 #include "linux_roadmap_shortcuts.h"
 #include "linux_visual_effects.h"
+#include "linux_msaa.h"
+#include "linux_hub_hold.h"
 #include "linux_format.h"
 #include "linux_threads.h"
 #include "linux_sdl_cursor.h"
@@ -414,21 +416,6 @@ static void sdlGlResetAttributes(void) { memset(gl_attributes, 0, sizeof(gl_attr
 static void *sdlGlCreateContext(void *window) {
     (void)window;
     NWindow *native = nwindowGetDefault();
-    const EGLint config_attributes[] = {EGL_RENDERABLE_TYPE,
-                                        EGL_OPENGL_BIT,
-                                        EGL_SURFACE_TYPE,
-                                        EGL_WINDOW_BIT,
-                                        EGL_RED_SIZE,
-                                        8,
-                                        EGL_GREEN_SIZE,
-                                        8,
-                                        EGL_BLUE_SIZE,
-                                        8,
-                                        EGL_ALPHA_SIZE,
-                                        8,
-                                        EGL_DEPTH_SIZE,
-                                        gl_attributes[6] ? gl_attributes[6] : 16,
-                                        EGL_NONE};
     EGLConfig config;
     EGLint count = 0;
     egl_display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
@@ -436,10 +423,26 @@ static void *sdlGlCreateContext(void *window) {
         trace("sdl.GL_CreateContext=FAIL stage=initialize egl_error=0x%x", eglGetError());
         return NULL;
     }
-    if (!eglBindAPI(EGL_OPENGL_API) || !eglChooseConfig(egl_display, config_attributes, &config, 1, &count) || count < 1) {
-        trace("sdl.GL_CreateContext=FAIL stage=config egl_error=0x%x", eglGetError());
-        return NULL;
+    if (!eglBindAPI(EGL_OPENGL_API)) return NULL;
+    const unsigned wanted = linuxMsaaRequested();
+    const unsigned options[] = {8u,4u,2u,0u};
+    bool matched = false;
+    for (unsigned i=0;i<4;i++) {
+        unsigned samples=options[i];
+        if(samples>wanted)continue;
+        const EGLint attrs[] = {EGL_RENDERABLE_TYPE,EGL_OPENGL_BIT,
+             EGL_SURFACE_TYPE,EGL_WINDOW_BIT,EGL_RED_SIZE,8,EGL_GREEN_SIZE,8,
+             EGL_BLUE_SIZE,8,EGL_ALPHA_SIZE,8,EGL_DEPTH_SIZE,
+             gl_attributes[6]?gl_attributes[6]:16,
+             EGL_SAMPLE_BUFFERS,samples?1:0,EGL_SAMPLES,(EGLint)samples,EGL_NONE};
+        count=0;
+        if(eglChooseConfig(egl_display,attrs,&config,1,&count)&&count>0){matched=true;break;}
     }
+    if(!matched){trace("sdl.GL_CreateContext=FAIL stage=config");return NULL;}
+    EGLint actual=0;
+    eglGetConfigAttrib(egl_display,config,EGL_SAMPLES,&actual);
+    linuxMsaaSetActive(actual>0?(unsigned)actual:0);
+    trace("sdl.MSAA requested=%u actual=%d",wanted,actual);
     egl_config = config;
     egl_surface = eglCreateWindowSurface(egl_display, config, (EGLNativeWindowType)native, NULL);
     if (egl_surface == EGL_NO_SURFACE) {
@@ -575,18 +578,23 @@ static void pumpInput(void) {
         bool presentation_changed = false;
         snapshot.buttons = linuxSdlInputPreprocess(snapshot.buttons, snapshot.timestamp_ns, &presentation_changed);
         if (presentation_changed) linuxVisualEffectsPulse();
+        // Open the unified hub after holding the left-stick button for 3 seconds.
+        static uint64_t l3_start;
+        static bool l3_triggered;
+        if (linuxHubHold(snapshot.timestamp_ns, snapshot.gamepad && !!(snapshot.buttons & (1u << 7)),
+                         &l3_start, &l3_triggered)) linuxRoadmapShowHub();
         // Clicking the right stick brings the keyboard up or down, by hand, whatever the game is doing: the game's own requests for text
         // input are not followed (they only came for some fields).
         bool keyboard_button = snapshot.gamepad && ((snapshot.buttons >> 8) & 1u);  // SDL_GAMEPAD_BUTTON_RIGHT_STICK
         LinuxRoadmapShortcut shortcut = linuxRoadmapShortcut(snapshot.buttons);
         if (keyboard_button && !keyboard_button_before && shortcut == ROADMAP_SHORTCUT_MAIN)
-            linuxRoadmapShow();
+            linuxRoadmapShowHub();
         else if (keyboard_button && !keyboard_button_before && shortcut == ROADMAP_SHORTCUT_SHOPPING)
-            linuxRoadmapShowShopping();
+            linuxRoadmapShowHub();
         else if (keyboard_button && !keyboard_button_before && shortcut == ROADMAP_SHORTCUT_TOAST)
             linuxRoadmapToastShow(snapshot.timestamp_ns);
         else if (keyboard_button && !keyboard_button_before && shortcut == ROADMAP_SHORTCUT_VISUAL)
-            linuxRoadmapShowVisual();
+            linuxRoadmapShowHub();
         else if (keyboard_button && !keyboard_button_before && linuxSdlInputKeyboardAvailable()) {
             bool show = !linuxSdlInputKeyboardVisible();
             trace("sdl.keyboard.toggle show=%d", show);

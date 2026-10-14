@@ -3,6 +3,11 @@
 #include <math.h>
 #include <stdio.h>
 int main(void) {
+    // Variable-width system-font glyphs use measured pixel widths, not a character count.
+    assert(nxTextMarqueePixels(190.0f, 200.0f, 3000000000ull) == 0.0f);
+    assert(nxTextMarqueePixels(340.0f, 120.0f, 0) == 0.0f);
+    assert(nxTextMarqueePixels(340.0f, 120.0f, 1000000000ull) == 0.0f);
+    assert(nxTextMarqueePixels(340.0f, 120.0f, 3000000000ull) > 0.0f);
     assert(nxTextMarqueeOffset(5, 20, 120, 5000000000ull) == 0);
     assert(nxTextMarqueeOffset(20, 20, 200, 0) == 0);
     assert(nxTextMarqueeOffset(20, 20, 200, 1000000000ull) == 0);

@@ -4,6 +4,8 @@
 #include "nxpanded_text.h"
 #include "linux_visual_effects.h"
 #include "linux_visual_menu.h"
+#include "linux_msaa.h"
+#include "linux_updater.h"
 #include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
@@ -31,7 +33,7 @@
 #define BTN_DOWN (1u << 12)
 #define BTN_LEFT (1u << 13)
 #define BTN_RIGHT (1u << 14)
-typedef enum { VIEW_NEXT, VIEW_CONFIRM, VIEW_STEPS, VIEW_ITEMS, VIEW_SETUP, VIEW_STOCK, VIEW_EDIT, VIEW_PICK, VIEW_CHAINS, VIEW_SHOPPING, VIEW_VISUAL } View;
+typedef enum { VIEW_NEXT, VIEW_CONFIRM, VIEW_STEPS, VIEW_ITEMS, VIEW_SETUP, VIEW_STOCK, VIEW_EDIT, VIEW_PICK, VIEW_CHAINS, VIEW_SHOPPING, VIEW_VISUAL, VIEW_HUB, VIEW_LOADER, VIEW_MODS, VIEW_UPDATES } View;
 typedef enum { ASK_DONE, ASK_REMOVE, ASK_CHAIN } Ask;
 typedef struct {
     int slot;
@@ -46,6 +48,10 @@ static View view, form, items_back, chains_back;  // form: the setup or edit vie
 static Ask ask;
 static bool yes, pick_none, typing, quiet;  // typing: the console's keyboard is up for the species; quiet: it just left, the buttons it was given back with do not count
 static int scroll, row, item_row, stock_row, edit, pick, chain_row, chain_count, visual_row, visual_tab;
+static int hub_selected;
+static bool hub_session;
+static char updater_message[180] = "Check the latest stable GitHub release.";
+static atomic_bool updater_pending;
 static const char *visual_notice;
 static Chain chains[CHAINS];
 static const char *notice;  // why the last thing in the chains list did not happen
@@ -163,7 +169,9 @@ static void show(View initial) {
     state.nature = state.left = -1;
     if (!breedLoad(FILE_PATH, &state)) breedLoad(FILE_PATH ".tmp", &state);  // the temporary file is what is left if the console went off while saving
     refresh();
-    view = initial == VIEW_SHOPPING || initial == VIEW_VISUAL ? initial : (problem ? VIEW_SETUP : VIEW_NEXT);  // an unset goal may still show its empty shopping list
+    view = initial == VIEW_HUB || initial == VIEW_SHOPPING || initial == VIEW_VISUAL ? initial : (problem ? VIEW_SETUP : VIEW_NEXT);  // an unset goal may still show its empty shopping list
+    hub_session = initial == VIEW_HUB;
+    if (hub_session) hub_selected = 0;
     form = VIEW_SETUP;
     scroll = row = item_row = visual_row = visual_tab = 0;
     visual_notice = NULL;
@@ -173,6 +181,7 @@ static void show(View initial) {
     unlock();
 }
 void linuxRoadmapShow(void) { show(VIEW_NEXT); }
+void linuxRoadmapShowHub(void) { show(VIEW_HUB); }
 void linuxRoadmapShowShopping(void) { show(VIEW_SHOPPING); }
 void linuxRoadmapShowVisual(void) { show(VIEW_VISUAL); }
 void linuxRoadmapToastShow(uint64_t now_ns) {
@@ -293,9 +302,40 @@ static void pressPick(uint32_t pressed) {  // the list, once the keyboard is gon
     if (pressed & BTN_B) view = form;
 }
 static void press(uint32_t pressed) {  // lock held; SDL gamepad buttons
+    if (view == VIEW_HUB) {
+        if (pressed & BTN_B) { atomic_store(&active,false); return; }
+        if (pressed & BTN_UP) hub_selected = hub_selected >= 2 ? hub_selected - 2 : (hub_selected == 4 ? 2 : hub_selected);
+        if (pressed & BTN_DOWN) hub_selected = hub_selected <= 1 ? hub_selected + 2 : 4;
+        if (pressed & BTN_LEFT) { if (hub_selected == 1 || hub_selected == 3) hub_selected--; else if(hub_selected==4)hub_selected=2; }
+        if (pressed & BTN_RIGHT) { if (hub_selected == 0 || hub_selected == 2) hub_selected++; else if(hub_selected==4)hub_selected=3; }
+        if (pressed & BTN_A) {
+            if (hub_selected==0) view=problem?VIEW_SETUP:VIEW_NEXT;
+            if (hub_selected==1) {view=VIEW_LOADER;}
+            if (hub_selected==2) {view=VIEW_MODS;}
+            if (hub_selected==3) {view=VIEW_VISUAL;visual_tab=visual_row=0;}
+            if (hub_selected==4) {view=VIEW_UPDATES;}
+        }
+        return;
+    }
+    if(view==VIEW_LOADER || view==VIEW_MODS || view==VIEW_UPDATES) {
+        if(pressed & BTN_B) {view=VIEW_HUB;return;}
+        if(view==VIEW_UPDATES && (pressed & BTN_A)) {
+            snprintf(updater_message,sizeof(updater_message),"Checking GitHub and downloading if newer...");
+            atomic_store(&updater_pending,true);
+        }
+        return;
+    }
     int steps = (int)plan.count;
-    if (view == VIEW_NEXT) {
-        if (pressed & BTN_B) atomic_store(&active, false);
+    if (view == VIEW_NEXT || view == VIEW_SHOPPING) {
+        if (!!(pressed & BTN_L) != !!(pressed & BTN_R)) {
+            view = view == VIEW_NEXT ? VIEW_SHOPPING : VIEW_NEXT;
+            return;
+        }
+        if (view == VIEW_SHOPPING) {
+            if (pressed & BTN_B) { if(hub_session)view=VIEW_HUB;else atomic_store(&active,false); }
+            return; // read-only tab never completes or edits a breeding step
+        }
+        if (pressed & BTN_B) {if(hub_session)view=VIEW_HUB;else atomic_store(&active,false);}
         if ((pressed & BTN_A) && !problem && steps) view = VIEW_CONFIRM, ask = ASK_DONE, yes = false;  // the answer starts at No
         if (pressed & BTN_X) view = VIEW_STEPS, scroll = 0;
         if (pressed & BTN_Y) view = VIEW_ITEMS, item_row = 0, items_back = VIEW_NEXT;
@@ -326,7 +366,7 @@ static void press(uint32_t pressed) {  // lock held; SDL gamepad buttons
         }
     } else if (view == VIEW_VISUAL) {
         if (pressed & BTN_B) { // B always closes, never toggles an effect
-            atomic_store(&active, false);
+            if(hub_session)view=VIEW_HUB;else atomic_store(&active,false);
             return;
         }
         // Shoulder buttons cycle tabs in either direction; a simultaneous L+R is ignored.
@@ -338,10 +378,16 @@ static void press(uint32_t pressed) {  // lock held; SDL gamepad buttons
         }
         visual_row += !!(pressed & BTN_DOWN) - !!(pressed & BTN_UP);
         if (visual_row < 0) visual_row = 0;
-        if ((unsigned)visual_row >= linuxVisualMenuRows((unsigned)visual_tab))
-            visual_row = (int)linuxVisualMenuRows((unsigned)visual_tab) - 1;
+        if ((unsigned)visual_row >= linuxVisualMenuRows((unsigned)visual_tab) + (visual_tab == 0 ? 1u : 0u))
+            visual_row = (int)linuxVisualMenuRows((unsigned)visual_tab) - 1 + (visual_tab == 0 ? 1 : 0);
         if (pressed & BTN_A) {
-            unsigned effect = linuxVisualMenuEffect((unsigned)visual_tab, (unsigned)visual_row);
+            if(visual_tab==0 && visual_row==0) {
+                unsigned requested=linuxMsaaRequested();
+                unsigned next=requested==0?2:(requested==2?4:(requested==4?8:0));
+                visual_notice=linuxMsaaSetRequested(next)?"MSAA choice saved. Restart NXpanded to apply.":"Could not save MSAA choice.";
+                return;
+            }
+            unsigned effect = linuxVisualMenuEffect((unsigned)visual_tab, (unsigned)(visual_row-(visual_tab==0?1:0)));
             if (effect < VISUAL_EFFECT_COUNT) {
                 if (!linuxVisualEffectToggle(effect))
                     visual_notice = "Setting changed; could not save to the SD card.";
@@ -349,8 +395,6 @@ static void press(uint32_t pressed) {  // lock held; SDL gamepad buttons
                     visual_notice = NULL;
             }
         }
-    } else if (view == VIEW_SHOPPING) {
-        if (pressed & BTN_B) atomic_store(&active, false);
     } else if (view == VIEW_STEPS) {
         scroll += ((pressed & BTN_DOWN) ? 1 : 0) - ((pressed & BTN_UP) ? 1 : 0) + ((pressed & BTN_R) ? 10 : 0) - ((pressed & BTN_L) ? 10 : 0);
         scroll = scroll < 0 ? 0 : (scroll > steps - 1 ? (steps > 0 ? steps - 1 : 0) : scroll);
@@ -420,6 +464,11 @@ void linuxRoadmapFeed(const LinuxInputSnapshot *s) {
         before = *s;
     }
     unlock();
+    if (atomic_exchange(&updater_pending,false)) {
+        char message[180];
+        linuxUpdaterCheckAndStage(message,sizeof(message));
+        lock();snprintf(updater_message,sizeof(updater_message),"%s",message);unlock();
+    }
 }
 
 // ---- drawing: the file chooser's rectangles and text, in a 1280x720 view -----------------------------------------------------------
@@ -438,12 +487,12 @@ static void line(float *y, const char *string, float r, float g, float b) {
             char segment[COLUMNS + 1u];
             memcpy(segment, at, take);
             segment[take] = 0;
-            drawText(TEXT_X, *y, segment, COLUMNS, r, g, b);
+            drawText(view == VIEW_NEXT || view == VIEW_SHOPPING ? 146 : TEXT_X, *y, segment, COLUMNS, r, g, b);
             *y += ROW;
             at += take;
             while (*at == ' ' || *at == '\t') ++at;
         } else {
-            drawText(TEXT_X, *y, at, COLUMNS, r, g, b);
+            drawText(view == VIEW_NEXT || view == VIEW_SHOPPING ? 146 : TEXT_X, *y, at, COLUMNS, r, g, b);
             *y += ROW;
             break;
         }
@@ -452,23 +501,40 @@ static void line(float *y, const char *string, float r, float g, float b) {
 }
 static void panel(float x, float y, float w, float h) {
     if (drawClip) drawClip(x + 10.0f, y + 7.0f, w - 20.0f, h - 14.0f);
-    drawRect(x - 3, y - 3, w + 6, h + 6, 0.35f, 0.75f, 0.45f, 1.0f);
-    drawRect(x, y, w, h, 0.04f, 0.07f, 0.06f, 0.94f);
+    drawRect(x - 2, y - 2, w + 4, h + 4, 0.43f, 0.74f, 0.80f, 0.98f);
+    drawRect(x, y, w, h, 0.064f, 0.105f, 0.135f, 0.96f);
+    drawRect(x, y, w, 7, 0.45f, 0.83f, 0.82f, 0.98f);
 }
 static void listLine(float *y, bool selected, const char *string) {  // a line of a list, with a bar behind the one that is picked
-    if (selected) drawRect(TEXT_X - 10, *y - 3, 1100, 32, 0.2f, 0.4f, 0.3f, 1.0f);
+    if (selected) drawRect(TEXT_X - 10, *y - 3, 1100, 32, 0.19f, 0.38f, 0.47f, 1.0f);
     line(y, string, 1.0f, 1.0f, 1.0f);
+}
+static void drawRoadmapTabs(bool shopping) {
+    // Visually grouped tabs with restrained contrast and controller-only navigation.
+    drawRect(120, 92, 1040, 74, 0.105f, 0.165f, 0.198f, 0.98f);
+    drawRect(136, 102, 482, 54, shopping ? 0.155f : 0.22f, shopping ? 0.235f : 0.45f,
+             shopping ? 0.27f : 0.48f, 1.0f);
+    drawRect(624, 102, 520, 54, shopping ? 0.22f : 0.155f, shopping ? 0.45f : 0.235f,
+             shopping ? 0.48f : 0.27f, 1.0f);
+    if (!shopping) drawRect(136, 150, 482, 5, 0.5f, 0.9f, 0.85f, 1);
+    else drawRect(624, 150, 520, 5, 0.5f, 0.9f, 0.85f, 1);
+    if (drawClip) drawClip(120, 48, 1040, 126);
+    drawText(160, 116, "01   BREEDING ROADMAP", 23, shopping ? 0.75f : 1.0f, 0.97f, 1.0f);
+    drawText(651, 116, "02   SHOPPING LIST", 23, 0.93f, shopping ? 1.0f : 0.75f, 1.0f);
+    drawText(843, 58, "L / R  Switch tabs", 22, 0.73f, 0.86f, 0.87f);
+    if (drawClip) drawClip(138, 179, 1002, 515);
 }
 static void drawNext(void) {
     char text[160], label[120];
-    float y = 424;
-    panel(30, 410, 1220, 300);
+    float y = 187;
+    panel(120, 171, 1040, 534);
+    drawRoadmapTabs(false);
     if (problem || !plan.count) {
         snprintf(text, sizeof(text), "Breeding roadmap - %s", state.species[0] ? state.species : "no target");
         line(&y, text, 1.0f, 0.85f, 0.3f);
         line(&y, problem ? problem : "Target met. Nothing left to breed.", problem ? 1.0f : 0.5f, problem ? 0.45f : 1.0f, problem ? 0.4f : 0.6f);
-        y = 664;
-        line(&y, "[Y]Items [X]Steps [+]Setup [-]Chains [B]Close", 0.7f, 0.8f, 0.75f);
+        y = 642;
+        line(&y, "[L/R] Tabs [Y] Items [X] Steps [+] Setup [-] Chains [B] Close", 0.7f, 0.8f, 0.75f);
         return;
     }
     const BreedStep *step = &plan.steps[0];
@@ -492,7 +558,7 @@ static void drawNext(void) {
     line(&y, text, 0.6f, 0.85f, 1.0f);
     snprintf(text, sizeof(text), "Egg groups: %s", eggs);
     line(&y, text, 0.7f, 0.8f, 0.75f);
-    line(&y, "[A]Done [Y]Items [X]Steps [+]Setup [-]Chains [B]Close", 0.7f, 0.8f, 0.75f);
+    line(&y, "[A] Done [L/R] Tabs [Y] Items [X] Steps [+] Setup [-] Chains [B] Close", 0.7f, 0.8f, 0.75f);
 }
 static void drawConfirm(void) {
     panel(240, 230, 800, 190);
@@ -532,16 +598,17 @@ static void drawSteps(void) {
 // Read-only list for the whole remaining chain, using the exact same green/dark palette as the roadmap.
 static void drawShopping(void) {
     char text[160];
-    float y = 34;
+    float y = 185;
     int purchases[BREED_ITEMS], total = 0, kinds = 0, owned = 0, required = 0;
     breedShoppingList(&state, &plan, purchases);
-    panel(30, 20, 1220, 680);
+    panel(120, 171, 1040, 534);
+    drawRoadmapTabs(true);
     snprintf(text, sizeof(text), "Shopping list - %s   [B] close", state.species[0] ? state.species : "no active goal");
     line(&y, text, 1.0f, 0.85f, 0.3f);
     y += ROW;
     if (problem) {
         line(&y, problem, 1.0f, 0.45f, 0.4f);
-        line(&y, "Set a goal with R + D-pad right + R3, then [+] Setup.", 0.7f, 0.8f, 0.75f);
+        line(&y, "Set a goal in the Roadmap tab, then press [+] Setup.", 0.7f, 0.8f, 0.75f);
         return;
     }
     snprintf(text, sizeof(text), "%u breeding steps remaining  |  Item requirements for the full goal", plan.count);
@@ -559,38 +626,99 @@ static void drawShopping(void) {
         line(&y, text, 1.0f, 1.0f, 1.0f);
     }
     if (!kinds) line(&y, "All required items are already in your recorded stock.", 0.5f, 1.0f, 0.6f);
-    y = 606;
+    y = 600;
     snprintf(text, sizeof(text), "To buy: %d items   |   In stock: %d/%d   |   %d item types missing", total, owned, required, kinds);
     line(&y, text, total ? 1.0f : 0.5f, total ? 0.85f : 1.0f, 0.3f + (total ? 0.0f : 0.3f));
-    line(&y, "Uses manually entered inventory; update it in the main roadmap.", 0.7f, 0.8f, 0.75f);
+    line(&y, "[L/R] Roadmap / Shopping   [B] Close   Inventory is entered manually.", 0.7f, 0.8f, 0.75f);
+}
+static void hubTile(float x,float y,float w,float h,const char *title,const char *description,int id) {
+    bool chosen=hub_selected==id;
+    drawRect(x-3,y-3,w+6,h+6,chosen?0.21f:0.30f,chosen?0.74f:0.37f,chosen?1.0f:0.65f,1.0f);
+    drawRect(x,y,w,h,chosen?0.07f:0.075f,chosen?0.20f:0.12f,chosen?0.39f:0.20f,0.99f);
+    drawRect(x+2,y+3,7,h-6,chosen?0.30f:0.25f,chosen?0.90f:0.37f,chosen?1.0f:0.63f,1.0f);
+    if(drawClip)drawClip(x+20,y+8,w-36,h-16);
+    drawText(x+31,y+33,title,29,1.0f,1.0f,1.0f);
+    drawText(x+31,y+81,description,40,0.72f,0.86f,0.95f);
+    if(drawClip)drawClip(48,175,1184,505);
+}
+static void drawHub(void) {
+    if(drawClip)drawClip(0,0,1280,720);
+    drawRect(0,0,1280,720,0.038f,0.076f,0.135f,0.97f);
+    drawRect(0,0,1280,168,0.042f,0.110f,0.198f,1.0f);
+    drawRect(0,164,1280,5,0.15f,0.65f,0.93f,1.0f);
+    drawText(390,38,"NXpanded",35,0.98f,0.99f,1.0f);
+    drawText(390,98,"POKEMMO ON NINTENDO SWITCH",39,0.64f,0.83f,1.0f);
+    if(drawClip)drawClip(36,176,1208,508);
+    hubTile(45,215,470,158,"Breeding Planner","Plan your next breed and shopping",0);
+    hubTile(765,215,470,158,"Loader Options","Loader settings (coming soon)",1);
+    hubTile(45,399,470,158,"Mods","Mod management (coming soon)",2);
+    hubTile(765,399,470,158,"Visual Enhancements","Shaders and MSAA",3);
+    drawRect(552,216,177,342,0.12f,0.21f,0.31f,1.0f);
+    drawRect(559,223,163,328,0.20f,0.36f,0.50f,1.0f);
+    // Minimal decorative egg silhouettes. The approved illustration is concept art,
+    // not an image asset; retain a crisp renderer with no bundled font or PNG dependency.
+    drawRect(576,360,75,118,0.82f,0.88f,0.67f,1.0f);
+    drawRect(636,389,68,94,0.93f,0.71f,0.78f,1.0f);
+    drawRect(600,448,61,78,0.40f,0.59f,0.89f,1.0f);
+    drawRect(587,395,20,24,0.37f,0.57f,0.36f,1.0f);
+    drawRect(673,426,17,24,1.0f,0.90f,0.96f,1.0f);
+    hubTile(390,588,500,80,"Check for Updates","Latest stable release from GitHub",4);
+    if(drawClip)drawClip(0,686,1280,34);
+    drawRect(0,687,1280,33,0.04f,0.09f,0.15f,1.0f);
+    drawText(55,691,"B  Back",18,1,1,1);
+    drawText(1085,691,"A  Select",18,1,1,1);
+}
+static void drawEmptyMenu(const char *title) {
+    if(drawClip)drawClip(0,0,1280,720);
+    drawRect(0,0,1280,720,0.035f,0.075f,0.14f,0.98f);
+    drawRect(0,0,1280,163,0.04f,0.11f,0.21f,1.0f);
+    drawText(420,48,"NXpanded",35,1,1,1);
+    drawRect(52,188,1176,470,0.25f,0.61f,0.85f,1.0f);
+    drawRect(59,195,1162,456,0.06f,0.16f,0.28f,1.0f);
+    if(drawClip)drawClip(100,220,1080,410);
+    drawText(119,238,title,44,1,1,1);
+    if(view==VIEW_UPDATES) {
+        drawText(120,337,"Press A to check for updates and stage a verified download.",60,0.74f,0.91f,0.97f);
+        drawText(120,414,updater_message,65,1.0f,0.87f,0.68f);
+        drawText(120,484,"Installation is manual after exiting NXpanded.",64,0.69f,0.82f,0.93f);
+    } else drawText(120,350,"This section is reserved for a future update.",60,0.70f,0.84f,0.96f);
+    drawText(120,600,"B  Return to NXpanded",42,0.82f,0.91f,1.0f);
 }
 static void drawVisual(void) {
     char label[150];
     const unsigned tab = (unsigned)visual_tab;
     panel(150, 40, 980, 615);
     drawText(180, 64, "NXpanded - Visual Enhancements", 45, 1.0f, 0.85f, 0.3f);
-    // Both tabs are always visible and selected with L/R, not touch.
+    // Three tabs share the available width; shoulders work in either direction.
+    static const char *const tabs[] = {
+        "1  Colour & detail", "2  Light & focus", "3  GPU intensive"
+    };
     for (unsigned t = 0; t < LINUX_VISUAL_TABS; ++t) {
-        const float x = t == 0 ? 171.0f : 635.0f;
+        const float x = 171.0f + (float)t * 313.0f;
         const bool current = t == tab;
-        drawRect(x, 114, 455, 49, current ? 0.19f : 0.08f, current ? 0.39f : 0.15f,
+        drawRect(x, 114, 302, 49, current ? 0.19f : 0.08f, current ? 0.39f : 0.15f,
                  current ? 0.28f : 0.12f, 1.0f);
-        drawText(x + 14, 126, t == 0 ? "1  Colour & detail" : "2  Light & focus", 22,
+        drawText(x + 13, 126, tabs[t], 20,
                  current ? 1.0f : 0.68f, current ? 0.95f : 0.75f, current ? 0.5f : 0.7f);
     }
-    drawText(180, 188, tab == 0 ? "Six lightweight adjustments" : "Six optional image effects", 49,
-             0.7f, 0.85f, 0.75f);
-    for (unsigned i = 0; i < linuxVisualMenuRows(tab); ++i) {
-        const unsigned effect = linuxVisualMenuEffect(tab, i);
-        const bool enabled = linuxVisualEffectEnabled(effect);
+    const char *subtitle = tab == 0 ? "Six lightweight adjustments" :
+                           tab == 1 ? "Six optional image effects" :
+                                      "Three experimental, GPU-heavy filters";
+    drawText(180, 188, subtitle, 56, 0.7f, 0.85f, 0.75f);
+    for (unsigned i = 0; i < linuxVisualMenuRows(tab)+(tab==0?1u:0u); ++i) {
+        const unsigned effect = tab==0 && i==0 ? VISUAL_EFFECT_COUNT : linuxVisualMenuEffect(tab, i-(tab==0?1:0));
+        const bool enabled = effect < VISUAL_EFFECT_COUNT && linuxVisualEffectEnabled(effect);
         const float y = 235.0f + 47.0f * i;
         if ((int)i == visual_row) drawRect(172, y - 7, 926, 39, 0.20f, 0.40f, 0.30f, 1.0f);
-        snprintf(label, sizeof(label), "%s    [ %s ]", linuxVisualEffectName(effect), enabled ? "ON " : "OFF");
+        if(effect==VISUAL_EFFECT_COUNT) snprintf(label,sizeof(label),"MSAA: %ux requested / %ux active [A: change]",linuxMsaaRequested(),linuxMsaaActive());
+        else snprintf(label, sizeof(label), "%s    [ %s ]", linuxVisualEffectName(effect), enabled ? "ON " : "OFF");
         drawText(198, y, label, 43, enabled ? 0.55f : 1.0f,
                  enabled ? 1.0f : 0.85f, enabled ? 0.6f : 0.65f);
     }
-    unsigned selected = linuxVisualMenuEffect(tab, (unsigned)visual_row);
-    drawText(180, 524, linuxVisualMenuDescription(selected), 50, 0.75f, 0.90f, 0.78f);
+    if (tab == 2)
+        drawText(180, 438, "Higher GPU cost. Enable one at a time to test frame rate.", 70, 1.0f, 0.72f, 0.45f);
+    unsigned selected = (tab==0 && visual_row==0) ? VISUAL_EFFECT_COUNT : linuxVisualMenuEffect(tab, (unsigned)(visual_row-(tab==0?1:0)));
+    drawText(180, 524, selected==VISUAL_EFFECT_COUNT ? "MSAA requires a restart; unsupported levels fall back." : linuxVisualMenuDescription(selected), 60, 0.75f, 0.90f, 0.78f);
     drawText(180, 553, "[L/R] tabs   [Up/Down] select   [A] toggle   [B] close", 52, 1.0f, 1.0f, 1.0f);
     int status = linuxVisualEffectsStatus();
     const char *message = status < 0 ? "Shader unavailable: game image unaffected."
@@ -702,10 +830,11 @@ void linuxRoadmapToastDraw(LinuxRoadmapRect rect, LinuxRoadmapText text, LinuxRo
     if (opacity <= 0.0f) return;
     lock();
     char buf[160], first[100], second[100];
-    const float x = 278.0f, y = 22.0f, w = 974.0f, h = 254.0f, tx = x + 22.0f;
+    const float w = 974.0f, x = (1280.0f - w) * 0.5f, y = 22.0f, h = 254.0f, tx = x + 22.0f;
     if (clip) clip(x + 12.0f, y + 6.0f, w - 24.0f, h - 12.0f);
-    rect(x - 3, y - 3, w + 6, h + 6, 0.35f, 0.75f, 0.45f, opacity);
-    rect(x, y, w, h, 0.04f, 0.07f, 0.06f, 0.94f * opacity);
+    rect(x - 2, y - 2, w + 4, h + 4, 0.47f, 0.80f, 0.84f, opacity);
+    rect(x, y, w, h, 0.063f, 0.11f, 0.14f, 0.94f * opacity);
+    rect(x, y, w, 6, 0.47f, 0.80f, 0.84f, opacity);
     text(tx, y + 13, "NXpanded - Quick progress", 43, 1.0f, 0.85f, 0.3f);
     snprintf(buf, sizeof(buf), "Goal: %.23s   |   %u step%s remaining", state.species[0] ? state.species : "(not set)", plan.count, plan.count == 1 ? "" : "s");
     text(tx, y + 45, buf, 43, 0.7f, 0.85f, 0.75f);
@@ -734,7 +863,11 @@ void linuxRoadmapDraw(LinuxRoadmapRect rect, LinuxRoadmapText text, LinuxRoadmap
     drawText = text;
     drawClip = clip;
     lock();
-    if (view == VIEW_VISUAL)
+    if (view == VIEW_HUB) drawHub();
+    else if (view == VIEW_LOADER) drawEmptyMenu("Loader Options");
+    else if (view == VIEW_MODS) drawEmptyMenu("Mods");
+    else if (view == VIEW_UPDATES) drawEmptyMenu("Check for Updates");
+    else if (view == VIEW_VISUAL)
         drawVisual();
     else if (view == VIEW_SHOPPING)
         drawShopping();

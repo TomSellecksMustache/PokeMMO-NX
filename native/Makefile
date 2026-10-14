@@ -11,7 +11,7 @@ include $(DEVKITPRO)/libnx/switch_rules
 TARGET      := PokeMMO
 APP_TITLE   := NXpanded
 APP_AUTHOR  := WyzeCorp
-APP_VERSION := 1.4.0
+APP_VERSION := 1.7.0-rc.1
 ICON        := icon.jpg
 
 BUILD    := build
@@ -21,13 +21,14 @@ INCLUDES := include
 ARCH    := -march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE
 CFLAGS  := -g -Wall -Wextra -Werror -O2 -mno-outline-atomics -ffunction-sections $(ARCH)
 CFLAGS  += $(INCLUDE) -D__SWITCH__ -DAPP_VERSION=\"$(APP_VERSION)\"
+CFLAGS  += $(shell $(PREFIX)pkg-config --cflags freetype2 libcurl)
 ASFLAGS := -g $(ARCH)
 LDFLAGS  = -specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
 # display.c replaces two libnx calls (see there)
 LDFLAGS += -Wl,--wrap=framebufferCreate,--wrap=nwindowDequeueBuffer
 
 # Mesa's EGL is C++, hence libstdc++
-LIBS    := -lglad -lEGL -lglapi -ldrm_nouveau -lz -lstdc++ -lm -lnx -lm
+LIBS    := $(shell $(PREFIX)pkg-config --libs freetype2 libcurl) -lglad -lEGL -lglapi -ldrm_nouveau -lz -lstdc++ -lm -lnx -lm
 LIBDIRS := $(PORTLIBS) $(LIBNX)
 
 ifneq ($(BUILD),$(notdir $(CURDIR)))
