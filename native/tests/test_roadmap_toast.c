@@ -255,12 +255,42 @@ static void hubMenu(void) {
     menuPress(1u << 1);assert(!linuxRoadmapOpen());
     menu_snapshot.buttons=0;linuxRoadmapFeed(&menu_snapshot);
 }
+static bool saw_cost, saw_move_notes;
+static void costText(float x,float y,const char *str,unsigned chars,float r,float g,float b){
+    (void)x;(void)y;(void)chars;(void)r;(void)g;(void)b;
+    if(strstr(str,"Breeding cost estimate"))saw_cost=true;
+    if(strstr(str,"EGG MOVES"))saw_move_notes=true;
+}
+static bool saw_compact_visual;
+static void visualRect(float x,float y,float w,float h,float r,float g,float b,float a){
+    (void)y;(void)r;(void)g;(void)b;
+    if(x==26.0f && w==608.0f && h==654.0f && a < 0.9f)saw_compact_visual=true;
+}
+static void polishMenu(void){
+    menu_snapshot=(LinuxInputSnapshot){0};menu_snapshot.gamepad=true;
+    menu_snapshot.timestamp_ns=13000000000ull;
+    linuxRoadmapShowShopping();linuxRoadmapFeed(&menu_snapshot);
+    menuPress(1u<<10); // shopping -> costs
+    saw_cost=false;linuxRoadmapDraw(fakeRect,costText,NULL);assert(saw_cost);
+    menuPress(1u<<3); // Y -> egg move reference
+    saw_move_notes=false;linuxRoadmapDraw(fakeRect,costText,NULL);assert(saw_move_notes);
+    menuPress(1u<<1); // back to costs
+    saw_cost=false;linuxRoadmapDraw(fakeRect,costText,NULL);assert(saw_cost);
+    menuPress(1u<<10); // costs -> roadmap
+    saw_road=false;linuxRoadmapDraw(fakeRect,tabText,NULL);assert(saw_road);
+    menuPress(1u<<1);menu_snapshot.buttons=0;linuxRoadmapFeed(&menu_snapshot);
+    linuxRoadmapShowVisual();linuxRoadmapFeed(&menu_snapshot);
+    saw_compact_visual=false;linuxRoadmapDraw(visualRect,fakeText,NULL);
+    assert(saw_compact_visual);
+    menuPress(1u<<1);menu_snapshot.buttons=0;linuxRoadmapFeed(&menu_snapshot);
+}
 int main(void) {
     shortcuts();
     toast();
     visualMenu();
     unifiedRoadmap();
     hubMenu();
+    polishMenu();
     puts("Breeding shortcut, toast, and controller-tab tests passed.");
     return 0;
 }

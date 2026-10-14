@@ -661,10 +661,10 @@ static void text(float x, float y, const char *string, unsigned max_chars, float
 
 static void drawPanel(void) {  // lock held
     const unsigned columns = (unsigned)((PANEL_W - 56.0f) / ADVANCE);
-    rect(0, 0, VIEW_WIDTH, VIEW_HEIGHT, 0.0f, 0.0f, 0.0f, picker.opaque ? 1.0f : 0.72f);
-    rect(PANEL_X - 2, PANEL_Y - 2, PANEL_W + 4, PANEL_H + 4, 0.43f, 0.75f, 0.82f, 1.0f);
-    rect(PANEL_X, PANEL_Y, PANEL_W, PANEL_H, 0.07f, 0.115f, 0.15f, 1.0f);
-    rect(PANEL_X, PANEL_Y, PANEL_W, 7, 0.47f, 0.82f, 0.87f, 1.0f);
+    rect(0, 0, VIEW_WIDTH, VIEW_HEIGHT, 0.025f, 0.055f, 0.10f, picker.opaque ? 1.0f : 0.62f);
+    rect(PANEL_X - 2, PANEL_Y - 2, PANEL_W + 4, PANEL_H + 4, 0.34f, 0.69f, 0.91f, 1.0f);
+    rect(PANEL_X, PANEL_Y, PANEL_W, PANEL_H, 0.06f, 0.115f, 0.20f, 0.96f);
+    rect(PANEL_X, PANEL_Y, PANEL_W, 7, 0.48f, 0.83f, 0.98f, 1.0f);
     char line[PATH_BYTES + 64];
     text(TEXT_X, 46, picker.title[0] ? picker.title : "Choose", columns, 1.0f, 1.0f, 1.0f);
     if (picker.filter_count) {
@@ -672,7 +672,7 @@ static void drawPanel(void) {  // lock held
         text(PANEL_X + PANEL_W - 28.0f - ADVANCE * (float)strlen(line), 46, line, columns, 0.7f, 0.7f, 0.7f);
     }
     text(TEXT_X, 86, picker.folder, columns, 0.7f, 0.7f, 0.7f);
-    rect(PANEL_X + 20, 120, PANEL_W - 40, 2, 0.33f, 0.53f, 0.58f, 1.0f);
+    rect(PANEL_X + 20, 120, PANEL_W - 40, 2, 0.28f, 0.56f, 0.77f, 1.0f);
     if (picker.listing_failed)
         text(TEXT_X, LIST_TOP + 4, "This folder cannot be read (B: back)", columns, 0.9f, 0.9f, 0.9f);
     else if (!picker.count)
@@ -681,7 +681,7 @@ static void drawPanel(void) {  // lock held
         unsigned index = picker.first + row;
         const Entry *entry = &picker.entries[index];
         float y = LIST_TOP + (float)row * ROW_HEIGHT;
-        if (index == picker.selected) rect(PANEL_X + 14, y - 2, PANEL_W - 28, ROW_HEIGHT - 2, 0.18f, 0.36f, 0.45f, 1.0f);
+        if (index == picker.selected) rect(PANEL_X + 14, y - 2, PANEL_W - 28, ROW_HEIGHT - 2, 0.14f, 0.37f, 0.57f, 0.97f);
         snprintf(line, sizeof(line), "%s%s", entry->name, entry->directory && strcmp(entry->name, "..") ? "/" : "");
         if (entry->directory)
             text(TEXT_X, y + 1, line, columns, 1.0f, 1.0f, 1.0f);
@@ -692,14 +692,14 @@ static void drawPanel(void) {  // lock held
         snprintf(line, sizeof(line), "%u/%u", picker.selected + 1, picker.count);
         text(PANEL_X + PANEL_W - 28.0f - ADVANCE * (float)strlen(line), 86, line, columns, 0.7f, 0.7f, 0.7f);
     }
-    rect(PANEL_X + 20, 614, PANEL_W - 40, 2, 0.33f, 0.53f, 0.58f, 1.0f);
+    rect(PANEL_X + 20, 614, PANEL_W - 40, 2, 0.28f, 0.56f, 0.77f, 1.0f);
     text(TEXT_X, 626, "A open/pick  B back  X cancel", 31, 0.65f, 0.65f, 0.65f);
     snprintf(line, sizeof(line), "%s%sL/R page", picker.action != LINUX_PICKER_OPEN ? "Y folder  " : "", picker.filter_count > 1 ? "- filter  " : "");
     text(TEXT_X, 654, line, 31, 0.65f, 0.65f, 0.65f);
     rect(CANCEL_X, BUTTON_Y, CANCEL_W, BUTTON_H, 0.20f, 0.32f, 0.40f, 1.0f);
     text(CANCEL_X + (CANCEL_W - 6 * ADVANCE) / 2, BUTTON_Y + 11, "Cancel", 6, 1.0f, 1.0f, 1.0f);
     if (picker.action != LINUX_PICKER_OPEN) {
-        rect(CHOOSE_X, BUTTON_Y, CHOOSE_W, BUTTON_H, 0.23f, 0.48f, 0.49f, 1.0f);
+        rect(CHOOSE_X, BUTTON_Y, CHOOSE_W, BUTTON_H, 0.18f, 0.49f, 0.72f, 1.0f);
         text(CHOOSE_X + (CHOOSE_W - 15 * ADVANCE) / 2, BUTTON_Y + 11, "Use this folder", 15, 1.0f, 1.0f, 1.0f);
     }
 }

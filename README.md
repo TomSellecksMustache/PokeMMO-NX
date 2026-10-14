@@ -91,3 +91,7 @@ Visual settings are intended to persist on the SD card; some 1.3.0 builds may re
 Based on [PokeMMO-NX](https://github.com/Petit-Prince-dev/PokeMMO-NX) by **Petit-Prince-dev**. Egg-group data: [PokeAPI](https://github.com/PokeAPI/pokeapi). NXpanded development and publishing: **WyzeCorp**.
 
 MIT licensed; see [LICENSE](LICENSE) and [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for copyright and third-party attribution.
+
+## NXpanded offline reference and costs
+
+Breeding includes **Roadmap**, **Shopping**, and **Costs** tabs. Prices are entered manually; there is no live GTL connection. Press **Y** on Costs to open optional egg-move notes. See [offline reference setup](docs/REFERENCE_DATA.md). Visual Enhancements uses a compact translucent panel to preview the game.

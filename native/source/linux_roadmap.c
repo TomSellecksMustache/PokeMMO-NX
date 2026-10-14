@@ -6,13 +6,17 @@
 #include "linux_visual_menu.h"
 #include "linux_msaa.h"
 #include "linux_updater.h"
+#include "nxpanded_costs.h"
+#include "nxpanded_hub_reference.h"
 #include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
 
 #define FILE_PATH "sdmc:/switch/PokeMMO-NXpanded/breeding.csv"  // the chain being worked on
-#define CHAIN_DIR "sdmc:/switch/PokeMMO-NXpanded/chains"         // the ones put aside, a file each
+#define CHAIN_DIR "sdmc:/switch/PokeMMO-NXpanded/chains"
+#define COST_PATH "sdmc:/switch/PokeMMO-NXpanded/breeding-prices.cfg"
+#define HUB_MOVES_PATH "sdmc:/switch/PokeMMO-NXpanded/hub-egg-moves.tsv"         // the ones put aside, a file each
 #define CHAIN_PATH CHAIN_DIR "/c%02d.csv"
 #define CHAINS 32
 #define ROW 30.0f
@@ -33,7 +37,7 @@
 #define BTN_DOWN (1u << 12)
 #define BTN_LEFT (1u << 13)
 #define BTN_RIGHT (1u << 14)
-typedef enum { VIEW_NEXT, VIEW_CONFIRM, VIEW_STEPS, VIEW_ITEMS, VIEW_SETUP, VIEW_STOCK, VIEW_EDIT, VIEW_PICK, VIEW_CHAINS, VIEW_SHOPPING, VIEW_VISUAL, VIEW_HUB, VIEW_LOADER, VIEW_MODS, VIEW_UPDATES } View;
+typedef enum { VIEW_NEXT, VIEW_CONFIRM, VIEW_STEPS, VIEW_ITEMS, VIEW_SETUP, VIEW_STOCK, VIEW_EDIT, VIEW_PICK, VIEW_CHAINS, VIEW_SHOPPING, VIEW_COSTS, VIEW_MOVES, VIEW_VISUAL, VIEW_HUB, VIEW_LOADER, VIEW_MODS, VIEW_UPDATES } View;
 typedef enum { ASK_DONE, ASK_REMOVE, ASK_CHAIN } Ask;
 typedef struct {
     int slot;
@@ -42,6 +46,12 @@ typedef struct {
 
 static BreedState state;
 static BreedPlan plan;
+static NxCosts prices;
+static NxHubEggMove move_notes[NX_HUB_MOVES_MAX];
+static size_t move_note_count;
+static int cost_row;
+static unsigned price_increment = 1000u;
+static const char *cost_notice;
 static const char *problem;
 static char eggs[64];
 static View view, form, items_back, chains_back;  // form: the setup or edit view that the species picker returns to
@@ -169,6 +179,10 @@ static void show(View initial) {
     state.nature = state.left = -1;
     if (!breedLoad(FILE_PATH, &state)) breedLoad(FILE_PATH ".tmp", &state);  // the temporary file is what is left if the console went off while saving
     refresh();
+    memset(&prices, 0, sizeof(prices));
+    nxCostRead(COST_PATH, &prices);
+    cost_row = 0;
+    cost_notice = NULL;
     view = initial == VIEW_HUB || initial == VIEW_SHOPPING || initial == VIEW_VISUAL ? initial : (problem ? VIEW_SETUP : VIEW_NEXT);  // an unset goal may still show its empty shopping list
     hub_session = initial == VIEW_HUB;
     if (hub_session) hub_selected = 0;
@@ -326,9 +340,32 @@ static void press(uint32_t pressed) {  // lock held; SDL gamepad buttons
         return;
     }
     int steps = (int)plan.count;
-    if (view == VIEW_NEXT || view == VIEW_SHOPPING) {
+    if (view == VIEW_MOVES) {
+        if (pressed & BTN_B) view = VIEW_COSTS;
+        return;
+    }
+    if (view == VIEW_NEXT || view == VIEW_SHOPPING || view == VIEW_COSTS) {
         if (!!(pressed & BTN_L) != !!(pressed & BTN_R)) {
-            view = view == VIEW_NEXT ? VIEW_SHOPPING : VIEW_NEXT;
+            // Roadmap <-> Shopping <-> Costs. No touch-only actions.
+            const int index = view == VIEW_NEXT ? 0 : view == VIEW_SHOPPING ? 1 : 2;
+            const int next = (index + ((pressed & BTN_R) ? 1 : 2)) % 3;
+            view = next == 0 ? VIEW_NEXT : next == 1 ? VIEW_SHOPPING : VIEW_COSTS;
+            return;
+        }
+        if (view == VIEW_COSTS) {
+            if (pressed & BTN_B) { if (hub_session) view=VIEW_HUB; else atomic_store(&active,false); return; }
+            if (pressed & BTN_UP) { if (cost_row > 0) --cost_row; }
+            if (pressed & BTN_DOWN) { if (cost_row < (int)NX_COST_COUNT-1) ++cost_row; }
+            if (pressed & BTN_X) price_increment = price_increment == 100 ? 1000 : price_increment == 1000 ? 10000 : 100;
+            if (pressed & BTN_Y) {
+                move_note_count = nxHubEggMoves(HUB_MOVES_PATH,state.species,move_notes,NX_HUB_MOVES_MAX);
+                view = VIEW_MOVES; return;
+            }
+            if (pressed & (BTN_LEFT | BTN_RIGHT)) {
+                const uint32_t old = prices.prices[cost_row];
+                prices.prices[cost_row] = nxCostAdjust(old, (pressed & BTN_RIGHT) ? 1 : -1, price_increment);
+                if (old != prices.prices[cost_row]) cost_notice = nxCostWrite(COST_PATH, &prices) ? NULL : "Could not save price estimates to SD.";
+            }
             return;
         }
         if (view == VIEW_SHOPPING) {
@@ -487,12 +524,12 @@ static void line(float *y, const char *string, float r, float g, float b) {
             char segment[COLUMNS + 1u];
             memcpy(segment, at, take);
             segment[take] = 0;
-            drawText(view == VIEW_NEXT || view == VIEW_SHOPPING ? 146 : TEXT_X, *y, segment, COLUMNS, r, g, b);
+            drawText(view == VIEW_NEXT || view == VIEW_SHOPPING || view == VIEW_COSTS ? 146 : TEXT_X, *y, segment, COLUMNS, r, g, b);
             *y += ROW;
             at += take;
             while (*at == ' ' || *at == '\t') ++at;
         } else {
-            drawText(view == VIEW_NEXT || view == VIEW_SHOPPING ? 146 : TEXT_X, *y, at, COLUMNS, r, g, b);
+            drawText(view == VIEW_NEXT || view == VIEW_SHOPPING || view == VIEW_COSTS ? 146 : TEXT_X, *y, at, COLUMNS, r, g, b);
             *y += ROW;
             break;
         }
@@ -501,34 +538,34 @@ static void line(float *y, const char *string, float r, float g, float b) {
 }
 static void panel(float x, float y, float w, float h) {
     if (drawClip) drawClip(x + 10.0f, y + 7.0f, w - 20.0f, h - 14.0f);
-    drawRect(x - 2, y - 2, w + 4, h + 4, 0.43f, 0.74f, 0.80f, 0.98f);
-    drawRect(x, y, w, h, 0.064f, 0.105f, 0.135f, 0.96f);
-    drawRect(x, y, w, 7, 0.45f, 0.83f, 0.82f, 0.98f);
+    drawRect(x - 2, y - 2, w + 4, h + 4, 0.35f, 0.68f, 0.88f, 0.95f);
+    drawRect(x, y, w, h, 0.065f, 0.115f, 0.195f, 0.90f);
+    drawRect(x, y, w, 7, 0.40f, 0.80f, 0.98f, 0.96f);
 }
 static void listLine(float *y, bool selected, const char *string) {  // a line of a list, with a bar behind the one that is picked
-    if (selected) drawRect(TEXT_X - 10, *y - 3, 1100, 32, 0.19f, 0.38f, 0.47f, 1.0f);
+    if (selected) drawRect(TEXT_X - 10, *y - 3, 1100, 32, 0.16f, 0.37f, 0.57f, 0.96f);
     line(y, string, 1.0f, 1.0f, 1.0f);
 }
-static void drawRoadmapTabs(bool shopping) {
-    // Visually grouped tabs with restrained contrast and controller-only navigation.
-    drawRect(120, 92, 1040, 74, 0.105f, 0.165f, 0.198f, 0.98f);
-    drawRect(136, 102, 482, 54, shopping ? 0.155f : 0.22f, shopping ? 0.235f : 0.45f,
-             shopping ? 0.27f : 0.48f, 1.0f);
-    drawRect(624, 102, 520, 54, shopping ? 0.22f : 0.155f, shopping ? 0.45f : 0.235f,
-             shopping ? 0.48f : 0.27f, 1.0f);
-    if (!shopping) drawRect(136, 150, 482, 5, 0.5f, 0.9f, 0.85f, 1);
-    else drawRect(624, 150, 520, 5, 0.5f, 0.9f, 0.85f, 1);
-    if (drawClip) drawClip(120, 48, 1040, 126);
-    drawText(160, 116, "01   BREEDING ROADMAP", 23, shopping ? 0.75f : 1.0f, 0.97f, 1.0f);
-    drawText(651, 116, "02   SHOPPING LIST", 23, 0.93f, shopping ? 1.0f : 0.75f, 1.0f);
-    drawText(843, 58, "L / R  Switch tabs", 22, 0.73f, 0.86f, 0.87f);
+static void drawRoadmapTabs(unsigned current) {
+    static const char *const titles[] = {"01   ROADMAP", "02   SHOPPING", "03   COSTS"};
+    // Share the hub's slate-blue glass surface, pale-cyan focus and white type.
+    drawRect(120, 92, 1040, 74, 0.085f, 0.16f, 0.25f, 0.95f);
+    for (unsigned t = 0; t < 3; ++t) {
+        float x = 132.0f + 339.0f * t;
+        bool selected = current == t;
+        drawRect(x, 101, 329, 54, selected ? 0.15f : 0.10f,
+                 selected ? 0.39f : 0.22f, selected ? 0.55f : 0.31f, 0.98f);
+        if (selected) drawRect(x, 150, 329, 5, 0.53f, 0.88f, 1.0f, 1.0f);
+        if (drawClip) drawClip(x + 9, 108, 308, 45);
+        drawText(x + 18, 116, titles[t], 24, 1.0f, selected ? 1.0f : 0.83f, 1.0f);
+    }
     if (drawClip) drawClip(138, 179, 1002, 515);
 }
 static void drawNext(void) {
     char text[160], label[120];
     float y = 187;
     panel(120, 171, 1040, 534);
-    drawRoadmapTabs(false);
+    drawRoadmapTabs(0);
     if (problem || !plan.count) {
         snprintf(text, sizeof(text), "Breeding roadmap - %s", state.species[0] ? state.species : "no target");
         line(&y, text, 1.0f, 0.85f, 0.3f);
@@ -602,7 +639,7 @@ static void drawShopping(void) {
     int purchases[BREED_ITEMS], total = 0, kinds = 0, owned = 0, required = 0;
     breedShoppingList(&state, &plan, purchases);
     panel(120, 171, 1040, 534);
-    drawRoadmapTabs(true);
+    drawRoadmapTabs(1);
     snprintf(text, sizeof(text), "Shopping list - %s   [B] close", state.species[0] ? state.species : "no active goal");
     line(&y, text, 1.0f, 0.85f, 0.3f);
     y += ROW;
@@ -631,6 +668,55 @@ static void drawShopping(void) {
     line(&y, text, total ? 1.0f : 0.5f, total ? 0.85f : 1.0f, 0.3f + (total ? 0.0f : 0.3f));
     line(&y, "[L/R] Roadmap / Shopping   [B] Close   Inventory is entered manually.", 0.7f, 0.8f, 0.75f);
 }
+static void drawCosts(void) {
+    char label[190];
+    NxCostEstimate estimate;
+    nxCostEstimate(&state, &plan, &prices, &estimate);
+    panel(120, 171, 1040, 534);
+    drawRoadmapTabs(2);
+    float y = 185;
+    snprintf(label, sizeof(label), "Breeding cost estimate - %s", state.species[0] ? state.species : "no active goal");
+    line(&y, label, 1.0f, 0.95f, 1.0f);
+    y += 4;
+    if (problem) {
+        line(&y, "Choose a breeding goal in Roadmap to see item requirements.", 0.9f, 0.87f, 0.75f);
+    } else {
+        for (unsigned i=0; i<NX_COST_COUNT; ++i) {
+            const int count = i< BREED_ITEMS ? estimate.outstanding[i] : (int)estimate.breeders_to_get;
+            if (i== (unsigned)cost_row) drawRect(139,y-2,980,31,0.14f,0.38f,0.55f,0.9f);
+            const char *name = i< BREED_ITEMS ? BREED_ITEM_NAMES[i] : "Unowned breeder (estimate)";
+            snprintf(label,sizeof(label),"%-24s  x%-3d  %8u / each",name,count,prices.prices[i]);
+            drawText(153,y,label,70,1.0f,i==(unsigned)cost_row?1.0f:0.90f,1.0f);
+            y += 37;
+        }
+        snprintf(label,sizeof(label), "Known subtotal: %llu PokeYen%s",
+                 (unsigned long long)estimate.known_total,
+                 estimate.unknown_units ? "  + items without prices" : "  (estimated total)");
+        drawText(150,536,label,80,0.86f,1.0f,0.84f);
+        snprintf(label,sizeof(label), "%u items / breeders have no entered price. No live GTL feed.",estimate.unknown_units);
+        drawText(150,566,label,82,0.75f,0.88f,0.96f);
+    }
+    drawText(150,611,"[Left/Right] Price  [X] Step size  [Y] Egg-move notes  [L/R] Tabs",81,1,1,1);
+    snprintf(label,sizeof(label),"Increment: %u PokeYen  |  %s",price_increment,cost_notice?cost_notice:"Prices stay on your SD card. [B] Close");
+    drawText(150,649,label,90,cost_notice?1.0f:0.77f,cost_notice?0.5f:0.87f,0.98f);
+}
+static void drawMoves(void) {
+    char label[170];
+    panel(120, 108, 1040, 555);
+    drawText(150,132,"EGG MOVES  |  Offline notes",60,1.0f,0.95f,1.0f);
+    snprintf(label,sizeof(label),"Goal: %.23s  |  Egg groups: %.63s",state.species[0]?state.species:"(not set)",eggs);
+    drawText(150,180,label,85,0.85f,0.96f,1.0f);
+    if (!move_note_count) {
+        drawText(150,265,"No verified egg-move notes for this goal.",70,1,1,1);
+        drawText(150,315,"Optional offline reference: hub-egg-moves.tsv",75,0.75f,0.87f,0.99f);
+    }
+    for (size_t i=0;i<move_note_count;++i) {
+        snprintf(label,sizeof(label),"%.49s   <-   %.49s",move_notes[i].move,move_notes[i].donor);
+        drawText(150,250+(float)i*56,label,84,1,1,1);
+    }
+    drawText(150,574,"Egg-move sources must be verified in game before breeding.",84,0.75f,0.87f,0.95f);
+    drawText(150,619,"[B] Return to Costs",55,1,1,1);
+}
 static void hubTile(float x,float y,float w,float h,const char *title,const char *description,int id) {
     bool chosen=hub_selected==id;
     drawRect(x-3,y-3,w+6,h+6,chosen?0.21f:0.30f,chosen?0.74f:0.37f,chosen?1.0f:0.65f,1.0f);
@@ -643,11 +729,11 @@ static void hubTile(float x,float y,float w,float h,const char *title,const char
 }
 static void drawHub(void) {
     if(drawClip)drawClip(0,0,1280,720);
-    drawRect(0,0,1280,720,0.038f,0.076f,0.135f,0.97f);
+    drawRect(0,0,1280,720,0.038f,0.076f,0.135f,0.94f);
     drawRect(0,0,1280,168,0.042f,0.110f,0.198f,1.0f);
     drawRect(0,164,1280,5,0.15f,0.65f,0.93f,1.0f);
-    drawText(390,38,"NXpanded",35,0.98f,0.99f,1.0f);
-    drawText(390,98,"POKEMMO ON NINTENDO SWITCH",39,0.64f,0.83f,1.0f);
+    drawText(559,38,"NXpanded",35,0.98f,0.99f,1.0f);
+    drawText(460,98,"POKEMMO ON NINTENDO SWITCH",39,0.64f,0.83f,1.0f);
     if(drawClip)drawClip(36,176,1208,508);
     hubTile(45,215,470,158,"Breeding Planner","Plan your next breed and shopping",0);
     hubTile(765,215,470,158,"Loader Options","Loader settings (coming soon)",1);
@@ -672,7 +758,7 @@ static void drawEmptyMenu(const char *title) {
     if(drawClip)drawClip(0,0,1280,720);
     drawRect(0,0,1280,720,0.035f,0.075f,0.14f,0.98f);
     drawRect(0,0,1280,163,0.04f,0.11f,0.21f,1.0f);
-    drawText(420,48,"NXpanded",35,1,1,1);
+    drawText(559,48,"NXpanded",35,1,1,1);
     drawRect(52,188,1176,470,0.25f,0.61f,0.85f,1.0f);
     drawRect(59,195,1162,456,0.06f,0.16f,0.28f,1.0f);
     if(drawClip)drawClip(100,220,1080,410);
@@ -685,49 +771,43 @@ static void drawEmptyMenu(const char *title) {
     drawText(120,600,"B  Return to NXpanded",42,0.82f,0.91f,1.0f);
 }
 static void drawVisual(void) {
-    char label[150];
+    char label[160];
     const unsigned tab = (unsigned)visual_tab;
-    panel(150, 40, 980, 615);
-    drawText(180, 64, "NXpanded - Visual Enhancements", 45, 1.0f, 0.85f, 0.3f);
-    // Three tabs share the available width; shoulders work in either direction.
-    static const char *const tabs[] = {
-        "1  Colour & detail", "2  Light & focus", "3  GPU intensive"
-    };
-    for (unsigned t = 0; t < LINUX_VISUAL_TABS; ++t) {
-        const float x = 171.0f + (float)t * 313.0f;
-        const bool current = t == tab;
-        drawRect(x, 114, 302, 49, current ? 0.19f : 0.08f, current ? 0.39f : 0.15f,
-                 current ? 0.28f : 0.12f, 1.0f);
-        drawText(x + 13, 126, tabs[t], 20,
-                 current ? 1.0f : 0.68f, current ? 0.95f : 0.75f, current ? 0.5f : 0.7f);
+    // Live preview: compact translucent panel. No full-screen background.
+    // Draw only on left side; the game occupies the remainder of the screen.
+    if (drawClip) drawClip(25,24,614,664);
+    drawRect(26,25,608,654,0.09f,0.18f,0.29f,0.76f);
+    drawRect(26,25,608,6,0.40f,0.78f,0.95f,0.94f);
+    drawText(49,46,"NXpanded - Visual Enhancements",44,1.0f,0.95f,1.0f);
+    static const char *const tabs[] = {"Colour & detail","Light & focus","GPU intensive"};
+    for (unsigned t=0;t<LINUX_VISUAL_TABS;++t) {
+        float x=43.0f+t*195.0f;
+        bool selected=t==tab;
+        drawRect(x,99,187,43,selected?0.18f:0.08f,selected?0.40f:0.20f,selected?0.60f:0.33f,selected?0.98f:0.77f);
+        drawText(x+9,110,tabs[t],30,1.0f,selected?1.0f:0.79f,1.0f);
     }
-    const char *subtitle = tab == 0 ? "Six lightweight adjustments" :
-                           tab == 1 ? "Six optional image effects" :
-                                      "Three experimental, GPU-heavy filters";
-    drawText(180, 188, subtitle, 56, 0.7f, 0.85f, 0.75f);
-    for (unsigned i = 0; i < linuxVisualMenuRows(tab)+(tab==0?1u:0u); ++i) {
-        const unsigned effect = tab==0 && i==0 ? VISUAL_EFFECT_COUNT : linuxVisualMenuEffect(tab, i-(tab==0?1:0));
-        const bool enabled = effect < VISUAL_EFFECT_COUNT && linuxVisualEffectEnabled(effect);
-        const float y = 235.0f + 47.0f * i;
-        if ((int)i == visual_row) drawRect(172, y - 7, 926, 39, 0.20f, 0.40f, 0.30f, 1.0f);
-        if(effect==VISUAL_EFFECT_COUNT) snprintf(label,sizeof(label),"MSAA: %ux requested / %ux active [A: change]",linuxMsaaRequested(),linuxMsaaActive());
-        else snprintf(label, sizeof(label), "%s    [ %s ]", linuxVisualEffectName(effect), enabled ? "ON " : "OFF");
-        drawText(198, y, label, 43, enabled ? 0.55f : 1.0f,
-                 enabled ? 1.0f : 0.85f, enabled ? 0.6f : 0.65f);
+    const char *subtitle = tab==0?"Six lightweight adjustments":tab==1?"Six optional image effects":"Three experimental, GPU-heavy filters";
+    drawText(51,156,subtitle,55,0.85f,0.93f,1.0f);
+    unsigned rows=linuxVisualMenuRows(tab)+(tab==0?1u:0u);
+    for(unsigned i=0;i<rows;++i){
+        unsigned effect=tab==0&&i==0?VISUAL_EFFECT_COUNT:linuxVisualMenuEffect(tab,i-(tab==0?1:0));
+        bool enabled=effect<VISUAL_EFFECT_COUNT&&linuxVisualEffectEnabled(effect);
+        float y=202+(float)i*47;
+        if((int)i==visual_row)drawRect(42,y-7,576,40,0.15f,0.37f,0.52f,0.93f);
+        if(effect==VISUAL_EFFECT_COUNT)
+            snprintf(label,sizeof(label),"MSAA: %ux selected / %ux active",linuxMsaaRequested(),linuxMsaaActive());
+        else snprintf(label,sizeof(label),"%s  [ %s ]",linuxVisualEffectName(effect),enabled?"ON":"OFF");
+        if(drawClip)drawClip(53,y-3,550,35);
+        drawText(59,y,label,67,enabled?0.70f:1.0f,1.0f,enabled?0.83f:1.0f);
     }
-    if (tab == 2)
-        drawText(180, 438, "Higher GPU cost. Enable one at a time to test frame rate.", 70, 1.0f, 0.72f, 0.45f);
-    unsigned selected = (tab==0 && visual_row==0) ? VISUAL_EFFECT_COUNT : linuxVisualMenuEffect(tab, (unsigned)(visual_row-(tab==0?1:0)));
-    drawText(180, 524, selected==VISUAL_EFFECT_COUNT ? "MSAA requires a restart; unsupported levels fall back." : linuxVisualMenuDescription(selected), 60, 0.75f, 0.90f, 0.78f);
-    drawText(180, 553, "[L/R] tabs   [Up/Down] select   [A] toggle   [B] close", 52, 1.0f, 1.0f, 1.0f);
-    int status = linuxVisualEffectsStatus();
-    const char *message = status < 0 ? "Shader unavailable: game image unaffected."
-                          : status > 0 ? "Shader ready (effects only when enabled)."
-                                       : "Shader loads when an effect is enabled.";
-    drawText(180, 587, message, 48, status < 0 ? 1.0f : 0.7f,
-             status < 0 ? 0.5f : 0.85f, 0.6f);
-    drawText(180, 624, visual_notice ? visual_notice : "Settings: switch/PokeMMO-NXpanded/visual-effects.cfg", 49,
-             visual_notice ? 1.0f : 0.7f, visual_notice ? 0.5f : 0.85f, 0.75f);
+    if(drawClip)drawClip(43,560,567,100);
+    unsigned selected=(tab==0&&visual_row==0)?VISUAL_EFFECT_COUNT:linuxVisualMenuEffect(tab,(unsigned)(visual_row-(tab==0?1:0)));
+    const char *description=selected==VISUAL_EFFECT_COUNT?"MSAA requires restart; unsupported values fall back.":linuxVisualMenuDescription(selected);
+    drawText(49,551,description,88,0.84f,0.94f,1.0f);
+    drawText(49,586,"[L/R] Tabs  [Up/Down] Select  [A] Toggle  [B] Close",82,1.0f,1.0f,1.0f);
+    int status=linuxVisualEffectsStatus();
+    const char *message=status<0?"Shader unavailable; original image remains visible.":status>0?"Shader ready. Settings update live.":"Enable a shader to initialize the filter.";
+    drawText(49,622,visual_notice?visual_notice:message,80,visual_notice?1.0f:0.82f,visual_notice?0.66f:0.95f,1.0f);
 }
 static void drawItems(void) {
     char text[160];
@@ -871,6 +951,10 @@ void linuxRoadmapDraw(LinuxRoadmapRect rect, LinuxRoadmapText text, LinuxRoadmap
         drawVisual();
     else if (view == VIEW_SHOPPING)
         drawShopping();
+    else if (view == VIEW_COSTS)
+        drawCosts();
+    else if (view == VIEW_MOVES)
+        drawMoves();
     else if (view == VIEW_STEPS)
         drawSteps();
     else if (view == VIEW_ITEMS)

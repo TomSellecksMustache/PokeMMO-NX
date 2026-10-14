@@ -15,3 +15,7 @@ The MIT license of this project (`LICENSE`) covers the code in this repository o
 The release zip also contains `PokeMMO-forwarder.nsp`, a home menu launcher made with an online NSP forwarder generator. It only starts `switch/PokeMMO-NXpanded/PokeMMO.nro` and holds no game data; it is not covered by the MIT license of this project.
 
 The release zip also contains the PokeMMO client, unmodified (revision 32920, Linux ARM64 part). It is proprietary software of the PokeMMO team and is not covered by the MIT license.
+
+## Optional data references
+
+NXpanded can validate player-supplied egg-move names using the independent [PokeMMO Hub pokemmo-data catalog](https://github.com/PokeMMO-Tools/pokemmo-data). Please credit its community maintainers and contribute corrections. Original data files, images and website code are not bundled.
