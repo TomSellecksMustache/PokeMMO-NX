@@ -14,6 +14,7 @@
 #include "linux_sdl_io.h"
 #include "linux_sdl_keys.h"
 #include "linux_sdl_input.h"
+#include "linux_sdl_filter.h"
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <stdarg.h>
@@ -571,6 +572,9 @@ static void pumpInput(void) {
             keyboard_button_before = true;
             return;
         }
+        bool presentation_changed = false;
+        snapshot.buttons = linuxSdlInputPreprocess(snapshot.buttons, snapshot.timestamp_ns, &presentation_changed);
+        if (presentation_changed) linuxVisualEffectsPulse();
         // Clicking the right stick brings the keyboard up or down, by hand, whatever the game is doing: the game's own requests for text
         // input are not followed (they only came for some fields).
         bool keyboard_button = snapshot.gamepad && ((snapshot.buttons >> 8) & 1u);  // SDL_GAMEPAD_BUTTON_RIGHT_STICK

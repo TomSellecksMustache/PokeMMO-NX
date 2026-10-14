@@ -102,3 +102,4 @@ jobs:
           name: ${{ inputs.tag || github.ref_name }}
           files: ${{ env.ZIP_PATH }}
           generate_release_notes: true
+          prerelease: true
