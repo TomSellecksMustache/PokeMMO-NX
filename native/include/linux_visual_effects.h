@@ -10,6 +10,13 @@ typedef enum {
     VISUAL_COLOR_GRADE,
     VISUAL_SOFT_PIXELS,
     VISUAL_VIGNETTE,
+    VISUAL_FXAA,
+    VISUAL_VIBRANCE,
+    VISUAL_CONTRAST,
+    VISUAL_HIGHLIGHTS,
+    VISUAL_SHARPEN,
+    VISUAL_SHADOWS,
+    VISUAL_HAZE,
     VISUAL_EFFECT_COUNT
 } LinuxVisualEffect;
 
@@ -18,6 +25,8 @@ uint32_t linuxVisualEffectMask(void);
 bool linuxVisualEffectEnabled(unsigned effect);
 // Returns false if the setting works for this session but could not be saved.
 bool linuxVisualEffectToggle(unsigned effect);
+void linuxVisualEffectsPulse(void); // presentation state; does not persist
+bool linuxVisualEffectsPulseActive(void);
 
 // Portable settings helpers, also used by host-side tests.
 bool linuxVisualSettingsRead(const char *path, uint32_t *mask);

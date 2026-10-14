@@ -71,7 +71,7 @@ static struct {
 } gl;
 static GLuint program, captured;
 static unsigned texture_width, texture_height;
-static GLint texel_uniform, scene_uniform, effect_uniform[VISUAL_EFFECT_COUNT];
+static GLint texel_uniform, scene_uniform, effect_uniform[VISUAL_EFFECT_COUNT], extra_uniform;
 static atomic_int status; // 0 before first active frame, 1 ready, -1 unavailable
 
 static const char *const vertex_source =
@@ -81,41 +81,67 @@ static const char *const fragment_source =
     "#version 120\n"
     "uniform sampler2D scene;\n"
     "uniform vec2 pixel;\n"
-    "uniform int tilt, bloom, grade, soften, vignette;\n"
+    "uniform int tilt, bloom, grade, soften, vignette, fxaa, vibrance, contrast, highlights, sharpen, shadows, haze;\n"
+    "uniform int u13;\n"
     "void main() {\n"
     "  vec2 uv = gl_TexCoord[0].xy;\n"
-    "  vec3 color = texture2D(scene, uv).rgb;\n"
+    "  vec3 base = texture2D(scene, uv).rgb;\n"
+    "  vec3 color = base;\n"
+    "  vec3 blur = base;\n"
     "  if (soften != 0) {\n"
-    "    vec2 d = pixel * 0.9;\n"
-    "    vec3 sm = (texture2D(scene, uv+vec2(d.x, d.y)).rgb +\n"
-    "               texture2D(scene, uv+vec2(-d.x, d.y)).rgb +\n"
+    "    vec2 d = pixel * 0.85;\n"
+    "    vec3 sm = (texture2D(scene, uv+vec2(d.x,d.y)).rgb +\n"
+    "               texture2D(scene, uv+vec2(-d.x,d.y)).rgb +\n"
     "               texture2D(scene, uv+vec2(d.x,-d.y)).rgb +\n"
-    "               texture2D(scene, uv-vec2(d.x, d.y)).rgb) * 0.25;\n"
-    "    color = mix(color, sm, 0.32);\n"
+    "               texture2D(scene, uv-vec2(d.x,d.y)).rgb) * 0.25;\n"
+    "    color = mix(color, sm, 0.28);\n"
     "  }\n"
-    "  if (tilt != 0 || bloom != 0) {\n"
-    "    vec2 dx = vec2(pixel.x * 3.0, 0.0);\n"
-    "    vec2 dy = vec2(0.0, pixel.y * 3.0);\n"
-    "    vec3 blur = (texture2D(scene, uv + dx).rgb + texture2D(scene, uv - dx).rgb +\n"
-    "                 texture2D(scene, uv + dy).rgb + texture2D(scene, uv - dy).rgb +\n"
-    "                 texture2D(scene, uv + dx + dy).rgb + texture2D(scene, uv - dx + dy).rgb +\n"
-    "                 texture2D(scene, uv + dx - dy).rgb + texture2D(scene, uv - dx - dy).rgb) * 0.125;\n"
-    "    if (tilt != 0) {\n"
-    "      float amount = smoothstep(0.13, 0.40, abs(uv.y - 0.53)) * 0.85;\n"
-    "      color = mix(color, blur, amount);\n"
+    "  if (fxaa != 0 || sharpen != 0) {\n"
+    "    vec3 a = texture2D(scene, uv+vec2(pixel.x,0.0)).rgb;\n"
+    "    vec3 b = texture2D(scene, uv-vec2(pixel.x,0.0)).rgb;\n"
+    "    vec3 c = texture2D(scene, uv+vec2(0.0,pixel.y)).rgb;\n"
+    "    vec3 d = texture2D(scene, uv-vec2(0.0,pixel.y)).rgb;\n"
+    "    vec3 avg = (a+b+c+d)*0.25;\n"
+    "    if (fxaa != 0) {\n"
+    "      float contrastEdge = abs(dot(base-avg, vec3(0.299,0.587,0.114)));\n"
+    "      color = mix(color, avg, smoothstep(0.045,0.20,contrastEdge)*0.32);\n"
     "    }\n"
-    "    if (bloom != 0) color += max(blur - vec3(0.62), vec3(0.0)) * 0.28;\n"
+    "    if (sharpen != 0) color = clamp(color+(base-avg)*0.30,0.0,1.0);\n"
     "  }\n"
-    "  if (grade != 0) {\n"
-    "    color = pow(clamp(color, 0.0, 1.0), vec3(0.94, 1.0, 1.07));\n"
-    "    float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));\n"
-    "    color = mix(vec3(luma), color, 1.07);\n"
+    "  if (tilt != 0 || bloom != 0 || u13 != 0) {\n"
+    "    vec2 dx = vec2(pixel.x*2.8,0.0);\n"
+    "    vec2 dy = vec2(0.0,pixel.y*2.8);\n"
+    "    blur = (texture2D(scene,uv+dx).rgb + texture2D(scene,uv-dx).rgb +\n"
+    "            texture2D(scene,uv+dy).rgb + texture2D(scene,uv-dy).rgb +\n"
+    "            texture2D(scene,uv+dx+dy).rgb + texture2D(scene,uv-dx+dy).rgb +\n"
+    "            texture2D(scene,uv+dx-dy).rgb + texture2D(scene,uv-dx-dy).rgb)*0.125;\n"
+    "    if (tilt != 0) {\n"
+    "      float edge = smoothstep(0.14,0.41,abs(uv.y-0.53));\n"
+    "      color = mix(color,blur,edge*0.78);\n"
+    "    }\n"
+    "    if (bloom != 0) color += max(blur-vec3(0.62),vec3(0.0))*0.30;\n"
     "  }\n"
-    "  if (vignette != 0) {\n"
-    "    vec2 p = (uv - vec2(0.5)) * vec2(1.05, 0.92);\n"
-    "    color *= 1.0 - smoothstep(0.24, 0.71, length(p)) * 0.24;\n"
+    "  if (grade != 0) color = pow(clamp(color,0.0,1.0),vec3(0.95,1.0,1.05));\n"
+    "  float luma = dot(color,vec3(0.2126,0.7152,0.0722));\n"
+    "  if (vibrance != 0) color = mix(vec3(luma),color,1.12);\n"
+    "  if (contrast != 0) color = (color-vec3(0.5))*1.11+vec3(0.5);\n"
+    "  if (shadows != 0) color *= mix(0.83,1.0,smoothstep(0.10,0.62,luma));\n"
+    "  if (highlights != 0) color = color/(vec3(1.0)+max(color-vec3(0.65),vec3(0.0))*0.32);\n"
+    "  if (haze != 0) color = mix(color,vec3(0.68,0.73,0.70),0.045+0.06*uv.y);\n"
+    "  if (u13 != 0) {\n"
+    "    // A single additional treatment on the same captured frame.\n"
+    "    float lum = dot(color,vec3(0.2126,0.7152,0.0722));\n"
+    "    vec3 shade = mix(vec3(0.48,0.61,0.75),vec3(1.22,1.11,0.98),smoothstep(0.14,0.78,lum));\n"
+    "    color *= shade;\n"
+    "    color = mix(color,blur,smoothstep(0.10,0.43,abs(uv.y-0.51))*0.34+0.08);\n"
+    "    color += max(blur-vec3(0.62),vec3(0.0))*0.34;\n"
+    "    color = (color-vec3(0.5))*1.10+vec3(0.5);\n"
     "  }\n"
-    "  gl_FragColor = vec4(clamp(color, 0.0, 1.0), 1.0);\n"
+    "  if (vignette != 0 || u13 != 0) {\n"
+    "    vec2 p = (uv-vec2(0.5))*vec2(1.05,0.91);\n"
+    "    color *= 1.0-smoothstep(0.23,0.72,length(p))*(vignette != 0 ? 0.24 : 0.16);\n"
+    "  }\n"
+    "  gl_FragColor = vec4(clamp(color,0.0,1.0),1.0);\n"
     "}\n";
 
 static bool symbol(void *slot, const char *name) {
@@ -172,16 +198,20 @@ static bool initialize(void) {
     }
     texel_uniform = gl.GetUniformLocation(program, "pixel");
     scene_uniform = gl.GetUniformLocation(program, "scene");
-    static const char *const uniforms[] = {"tilt", "bloom", "grade", "soften", "vignette"};
+    static const char *const uniforms[] = {
+        "tilt", "bloom", "grade", "soften", "vignette", "fxaa", "vibrance",
+        "contrast", "highlights", "sharpen", "shadows", "haze"
+    };
     for (unsigned i = 0; i < VISUAL_EFFECT_COUNT; ++i)
         effect_uniform[i] = gl.GetUniformLocation(program, uniforms[i]);
+    extra_uniform = gl.GetUniformLocation(program, "u13");
     gl.GenTextures(1, &captured);
     return captured != 0;
 }
 int linuxVisualEffectsStatus(void) { return atomic_load(&status); }
 void linuxVisualEffectsRender(unsigned width, unsigned height) {
     uint32_t mask = linuxVisualEffectMask();
-    if (!mask || !width || !height || width > 3840 || height > 2160 || atomic_load(&status) < 0) return;
+    if (!(mask || linuxVisualEffectsPulseActive()) || !width || !height || width > 3840 || height > 2160 || atomic_load(&status) < 0) return;
     if (!atomic_load(&status)) {
         if (!initialize()) { atomic_store(&status, -1); return; }
         atomic_store(&status, 1);
@@ -231,6 +261,7 @@ void linuxVisualEffectsRender(unsigned width, unsigned height) {
         gl.Uniform2f(texel_uniform, 1.0f / (float)width, 1.0f / (float)height);
         for (unsigned i = 0; i < VISUAL_EFFECT_COUNT; ++i)
             gl.Uniform1i(effect_uniform[i], !!(mask & (1u << i)));
+        gl.Uniform1i(extra_uniform, linuxVisualEffectsPulseActive() ? 1 : 0);
         gl.Color4f(1, 1, 1, 1);
         gl.Begin(GL_QUADS);
         gl.TexCoord2f(0, 0); gl.Vertex2f(-1, -1);

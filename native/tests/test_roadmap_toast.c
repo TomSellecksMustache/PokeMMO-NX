@@ -70,7 +70,7 @@ static void fakeRect(float x, float y, float w, float h, float r, float g, float
 static void fakeText(float x, float y, const char *str, unsigned chars, float r, float g, float b) {
     (void)x; (void)y; (void)chars; (void)r; (void)g; (void)b;
     if (strstr(str, "NXpanded - Visual Enhancements")) seen_title = true;
-    if (strstr(str, "Higher GPU cost")) seen_tab2 = true;
+    if (strstr(str, "Six optional image effects")) seen_tab2 = true;
     if (strstr(str, "Colour grading") && strstr(str, "[ ")) seen_grade = true;
     if (strstr(str, "Vignette") && strstr(str, "[ ")) seen_vignette = true;
     if (strstr(str, "Soften pixels") && strstr(str, "[ ")) seen_soft = true;
@@ -98,14 +98,21 @@ static void menuPress(uint32_t buttons) {
 }
 static void visualMenu(void) {
     assert(LINUX_VISUAL_TABS == 2);
-    assert(linuxVisualMenuRows(0) == 2 && linuxVisualMenuRows(1) == 3);
+    assert(linuxVisualMenuRows(0) == 6 && linuxVisualMenuRows(1) == 6);
     assert(linuxVisualMenuRows(2) == 0);
     assert(linuxVisualMenuEffect(0, 0) == VISUAL_COLOR_GRADE);
     assert(linuxVisualMenuEffect(0, 1) == VISUAL_VIGNETTE);
     assert(linuxVisualMenuEffect(1, 0) == VISUAL_SOFT_PIXELS);
     assert(linuxVisualMenuEffect(1, 1) == VISUAL_TILT_SHIFT);
     assert(linuxVisualMenuEffect(1, 2) == VISUAL_BLOOM);
-    assert(linuxVisualMenuEffect(1, 3) == VISUAL_EFFECT_COUNT);
+    assert(linuxVisualMenuEffect(0, 2) == VISUAL_VIBRANCE);
+    assert(linuxVisualMenuEffect(0, 3) == VISUAL_CONTRAST);
+    assert(linuxVisualMenuEffect(0, 4) == VISUAL_SHADOWS);
+    assert(linuxVisualMenuEffect(0, 5) == VISUAL_HIGHLIGHTS);
+    assert(linuxVisualMenuEffect(1, 3) == VISUAL_FXAA);
+    assert(linuxVisualMenuEffect(1, 4) == VISUAL_SHARPEN);
+    assert(linuxVisualMenuEffect(1, 5) == VISUAL_HAZE);
+    assert(linuxVisualMenuEffect(1, 6) == VISUAL_EFFECT_COUNT);
     assert(!linuxRoadmapCapturesInput());
     linuxRoadmapShowVisual();
     assert(linuxRoadmapOpen() && linuxRoadmapCapturesInput());

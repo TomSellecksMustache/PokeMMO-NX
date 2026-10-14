@@ -575,30 +575,30 @@ static void drawVisual(void) {
         const bool current = t == tab;
         drawRect(x, 114, 455, 49, current ? 0.19f : 0.08f, current ? 0.39f : 0.15f,
                  current ? 0.28f : 0.12f, 1.0f);
-        drawText(x + 14, 126, t == 0 ? "1  Colour & finish" : "2  Soft focus", 22,
+        drawText(x + 14, 126, t == 0 ? "1  Colour & detail" : "2  Light & focus", 22,
                  current ? 1.0f : 0.68f, current ? 0.95f : 0.75f, current ? 0.5f : 0.7f);
     }
-    drawText(180, 188, tab == 0 ? "Low-cost everyday effects" : "Higher GPU cost - try one at a time", 49,
+    drawText(180, 188, tab == 0 ? "Six lightweight adjustments" : "Six optional image effects", 49,
              0.7f, 0.85f, 0.75f);
     for (unsigned i = 0; i < linuxVisualMenuRows(tab); ++i) {
         const unsigned effect = linuxVisualMenuEffect(tab, i);
         const bool enabled = linuxVisualEffectEnabled(effect);
-        const float y = 247.0f + 69.0f * i;
-        if ((int)i == visual_row) drawRect(172, y - 9, 926, 52, 0.20f, 0.40f, 0.30f, 1.0f);
+        const float y = 235.0f + 47.0f * i;
+        if ((int)i == visual_row) drawRect(172, y - 7, 926, 39, 0.20f, 0.40f, 0.30f, 1.0f);
         snprintf(label, sizeof(label), "%s    [ %s ]", linuxVisualEffectName(effect), enabled ? "ON " : "OFF");
         drawText(198, y, label, 43, enabled ? 0.55f : 1.0f,
                  enabled ? 1.0f : 0.85f, enabled ? 0.6f : 0.65f);
     }
     unsigned selected = linuxVisualMenuEffect(tab, (unsigned)visual_row);
-    drawText(180, 467, linuxVisualMenuDescription(selected), 50, 0.75f, 0.90f, 0.78f);
-    drawText(180, 507, "[L/R] tabs   [Up/Down] select   [A] toggle   [B] close", 52, 1.0f, 1.0f, 1.0f);
+    drawText(180, 524, linuxVisualMenuDescription(selected), 50, 0.75f, 0.90f, 0.78f);
+    drawText(180, 553, "[L/R] tabs   [Up/Down] select   [A] toggle   [B] close", 52, 1.0f, 1.0f, 1.0f);
     int status = linuxVisualEffectsStatus();
     const char *message = status < 0 ? "Shader unavailable: game image unaffected."
                           : status > 0 ? "Shader ready (effects only when enabled)."
                                        : "Shader loads when an effect is enabled.";
-    drawText(180, 553, message, 48, status < 0 ? 1.0f : 0.7f,
+    drawText(180, 587, message, 48, status < 0 ? 1.0f : 0.7f,
              status < 0 ? 0.5f : 0.85f, 0.6f);
-    drawText(180, 594, visual_notice ? visual_notice : "Saved: switch/PokeMMO-NXpanded/visual-effects.cfg", 49,
+    drawText(180, 624, visual_notice ? visual_notice : "Settings: switch/PokeMMO-NXpanded/visual-effects.cfg", 49,
              visual_notice ? 1.0f : 0.7f, visual_notice ? 0.5f : 0.85f, 0.75f);
 }
 static void drawItems(void) {

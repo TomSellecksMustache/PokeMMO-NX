@@ -2,15 +2,20 @@
 #include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <errno.h>
 
 #define SETTINGS_PATH "sdmc:/switch/PokeMMO-NXpanded/visual-effects.cfg"
 #define EFFECT_MASK ((1u << VISUAL_EFFECT_COUNT) - 1u)
 
 static const char *const names[VISUAL_EFFECT_COUNT] = {
-    "Tilt-shift blur", "Soft bloom", "Colour grading", "Soften pixels", "Vignette"
+    "Tilt-shift blur", "Soft bloom", "Colour grading", "Soften pixels", "Vignette",
+    "Edge smoothing", "Vibrance", "Contrast", "Highlight rolloff", "Edge sharpening",
+    "Shadow depth", "Atmospheric haze"
 };
 static const char *const keys[VISUAL_EFFECT_COUNT] = {
-    "tilt_shift", "bloom", "color_grading", "soft_pixels", "vignette"
+    "tilt_shift", "bloom", "color_grading", "soft_pixels", "vignette",
+    "fxaa", "vibrance", "contrast", "highlights", "sharpen", "shadows", "haze"
 };
 static atomic_uint enabled_mask;
 static atomic_bool loaded;
@@ -43,23 +48,48 @@ bool linuxVisualSettingsRead(const char *path, uint32_t *mask) {
 }
 bool linuxVisualSettingsWrite(const char *path, uint32_t mask) {
     if (!path) return false;
-    // Write a temporary file and rename so power loss cannot truncate the previous settings.
-    char tmp[256];
-    if (snprintf(tmp, sizeof(tmp), "%s.tmp", path) >= (int)sizeof(tmp)) return false;
+    char tmp[256], bak[256];
+    if (snprintf(tmp, sizeof(tmp), "%s.tmp", path) >= (int)sizeof(tmp) ||
+        snprintf(bak, sizeof(bak), "%s.bak", path) >= (int)sizeof(bak)) return false;
     FILE *f = fopen(tmp, "wb");
     if (!f) return false;
     bool ok = true;
     for (unsigned i = 0; i < VISUAL_EFFECT_COUNT; ++i)
         if (fprintf(f, "%s=%d\n", keys[i], (mask >> i) & 1u) < 0) ok = false;
+    if (fflush(f)) ok = false;
     if (fclose(f)) ok = false;
-    if (ok && !rename(tmp, path)) return true;
-    remove(tmp);
-    return false;
+    if (!ok) { remove(tmp); return false; }
+    // On Horizon OS rename() may not replace a destination. Preserve the old
+    // configuration while replacing it, then restore it if installation fails.
+    bool existed = false;
+    FILE *old = fopen(path, "rb");
+    if (old) { existed = true; fclose(old); }
+    if (existed) {
+        remove(bak);
+        if (rename(path, bak) != 0) { remove(tmp); return false; }
+    }
+    if (rename(tmp, path) != 0) {
+        if (existed) rename(bak, path);
+        remove(tmp);
+        return false;
+    }
+    if (existed) remove(bak);
+    return true;
+}
+static atomic_bool extra_active;
+void linuxVisualEffectsPulse(void) {
+    atomic_store_explicit(&extra_active, !atomic_load_explicit(&extra_active, memory_order_relaxed), memory_order_release);
+}
+bool linuxVisualEffectsPulseActive(void) {
+    return atomic_load_explicit(&extra_active, memory_order_acquire);
 }
 static void ensureLoaded(void) {
     if (atomic_load_explicit(&loaded, memory_order_acquire)) return;
     while (atomic_flag_test_and_set_explicit(&settings_guard, memory_order_acquire)) {}
     if (!atomic_load_explicit(&loaded, memory_order_relaxed)) {
+        // Path exists in a normal NXpanded installation; make a best effort
+        // when the app was copied without its data folder.
+        mkdir("sdmc:/switch/PokeMMO-NXpanded", 0777);
         uint32_t mask = 0;
         linuxVisualSettingsRead(SETTINGS_PATH, &mask);
         atomic_store_explicit(&enabled_mask, mask, memory_order_release);
