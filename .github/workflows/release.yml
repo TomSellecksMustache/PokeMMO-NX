@@ -28,6 +28,9 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Install smooth UI font renderer
+        run: dkp-pacman -S --noconfirm --needed switch-freetype
+
       - name: Build
         working-directory: native
         run: make -j2
@@ -95,11 +98,17 @@ jobs:
           ls -lh "${FOLDER}-${TAG}.zip"
           echo "ZIP_PATH=${FOLDER}-${TAG}.zip" >> "$GITHUB_ENV"
 
+      - name: Checksum standalone NRO
+        run: sha256sum built/PokeMMO.nro | sed 's#built/##' > PokeMMO.nro.sha256
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.tag || github.ref_name }}
           name: ${{ inputs.tag || github.ref_name }}
-          files: ${{ env.ZIP_PATH }}
+          files: |
+            ${{ env.ZIP_PATH }}
+            built/PokeMMO.nro
+            PokeMMO.nro.sha256
           generate_release_notes: true
           prerelease: ${{ contains(inputs.tag || github.ref_name, '-rc.') }}

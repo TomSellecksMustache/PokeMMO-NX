@@ -294,7 +294,15 @@ static void pressPick(uint32_t pressed) {  // the list, once the keyboard is gon
 }
 static void press(uint32_t pressed) {  // lock held; SDL gamepad buttons
     int steps = (int)plan.count;
-    if (view == VIEW_NEXT) {
+    if (view == VIEW_NEXT || view == VIEW_SHOPPING) {
+        if (!!(pressed & BTN_L) != !!(pressed & BTN_R)) {
+            view = view == VIEW_NEXT ? VIEW_SHOPPING : VIEW_NEXT;
+            return;
+        }
+        if (view == VIEW_SHOPPING) {
+            if (pressed & BTN_B) atomic_store(&active, false);
+            return; // read-only tab never completes or edits a breeding step
+        }
         if (pressed & BTN_B) atomic_store(&active, false);
         if ((pressed & BTN_A) && !problem && steps) view = VIEW_CONFIRM, ask = ASK_DONE, yes = false;  // the answer starts at No
         if (pressed & BTN_X) view = VIEW_STEPS, scroll = 0;
@@ -349,8 +357,6 @@ static void press(uint32_t pressed) {  // lock held; SDL gamepad buttons
                     visual_notice = NULL;
             }
         }
-    } else if (view == VIEW_SHOPPING) {
-        if (pressed & BTN_B) atomic_store(&active, false);
     } else if (view == VIEW_STEPS) {
         scroll += ((pressed & BTN_DOWN) ? 1 : 0) - ((pressed & BTN_UP) ? 1 : 0) + ((pressed & BTN_R) ? 10 : 0) - ((pressed & BTN_L) ? 10 : 0);
         scroll = scroll < 0 ? 0 : (scroll > steps - 1 ? (steps > 0 ? steps - 1 : 0) : scroll);
@@ -438,12 +444,12 @@ static void line(float *y, const char *string, float r, float g, float b) {
             char segment[COLUMNS + 1u];
             memcpy(segment, at, take);
             segment[take] = 0;
-            drawText(TEXT_X, *y, segment, COLUMNS, r, g, b);
+            drawText(view == VIEW_NEXT || view == VIEW_SHOPPING ? 146 : TEXT_X, *y, segment, COLUMNS, r, g, b);
             *y += ROW;
             at += take;
             while (*at == ' ' || *at == '\t') ++at;
         } else {
-            drawText(TEXT_X, *y, at, COLUMNS, r, g, b);
+            drawText(view == VIEW_NEXT || view == VIEW_SHOPPING ? 146 : TEXT_X, *y, at, COLUMNS, r, g, b);
             *y += ROW;
             break;
         }
@@ -452,23 +458,40 @@ static void line(float *y, const char *string, float r, float g, float b) {
 }
 static void panel(float x, float y, float w, float h) {
     if (drawClip) drawClip(x + 10.0f, y + 7.0f, w - 20.0f, h - 14.0f);
-    drawRect(x - 3, y - 3, w + 6, h + 6, 0.35f, 0.75f, 0.45f, 1.0f);
-    drawRect(x, y, w, h, 0.04f, 0.07f, 0.06f, 0.94f);
+    drawRect(x - 2, y - 2, w + 4, h + 4, 0.43f, 0.74f, 0.80f, 0.98f);
+    drawRect(x, y, w, h, 0.064f, 0.105f, 0.135f, 0.96f);
+    drawRect(x, y, w, 7, 0.45f, 0.83f, 0.82f, 0.98f);
 }
 static void listLine(float *y, bool selected, const char *string) {  // a line of a list, with a bar behind the one that is picked
-    if (selected) drawRect(TEXT_X - 10, *y - 3, 1100, 32, 0.2f, 0.4f, 0.3f, 1.0f);
+    if (selected) drawRect(TEXT_X - 10, *y - 3, 1100, 32, 0.19f, 0.38f, 0.47f, 1.0f);
     line(y, string, 1.0f, 1.0f, 1.0f);
+}
+static void drawRoadmapTabs(bool shopping) {
+    // Visually grouped tabs with restrained contrast and controller-only navigation.
+    drawRect(120, 92, 1040, 74, 0.105f, 0.165f, 0.198f, 0.98f);
+    drawRect(136, 102, 482, 54, shopping ? 0.155f : 0.22f, shopping ? 0.235f : 0.45f,
+             shopping ? 0.27f : 0.48f, 1.0f);
+    drawRect(624, 102, 520, 54, shopping ? 0.22f : 0.155f, shopping ? 0.45f : 0.235f,
+             shopping ? 0.48f : 0.27f, 1.0f);
+    if (!shopping) drawRect(136, 150, 482, 5, 0.5f, 0.9f, 0.85f, 1);
+    else drawRect(624, 150, 520, 5, 0.5f, 0.9f, 0.85f, 1);
+    if (drawClip) drawClip(120, 48, 1040, 126);
+    drawText(160, 116, "01   BREEDING ROADMAP", 23, shopping ? 0.75f : 1.0f, 0.97f, 1.0f);
+    drawText(651, 116, "02   SHOPPING LIST", 23, 0.93f, shopping ? 1.0f : 0.75f, 1.0f);
+    drawText(843, 58, "L / R  Switch tabs", 22, 0.73f, 0.86f, 0.87f);
+    if (drawClip) drawClip(138, 179, 1002, 515);
 }
 static void drawNext(void) {
     char text[160], label[120];
-    float y = 424;
-    panel(30, 410, 1220, 300);
+    float y = 187;
+    panel(120, 171, 1040, 534);
+    drawRoadmapTabs(false);
     if (problem || !plan.count) {
         snprintf(text, sizeof(text), "Breeding roadmap - %s", state.species[0] ? state.species : "no target");
         line(&y, text, 1.0f, 0.85f, 0.3f);
         line(&y, problem ? problem : "Target met. Nothing left to breed.", problem ? 1.0f : 0.5f, problem ? 0.45f : 1.0f, problem ? 0.4f : 0.6f);
-        y = 664;
-        line(&y, "[Y]Items [X]Steps [+]Setup [-]Chains [B]Close", 0.7f, 0.8f, 0.75f);
+        y = 642;
+        line(&y, "[L/R] Tabs [Y] Items [X] Steps [+] Setup [-] Chains [B] Close", 0.7f, 0.8f, 0.75f);
         return;
     }
     const BreedStep *step = &plan.steps[0];
@@ -492,7 +515,7 @@ static void drawNext(void) {
     line(&y, text, 0.6f, 0.85f, 1.0f);
     snprintf(text, sizeof(text), "Egg groups: %s", eggs);
     line(&y, text, 0.7f, 0.8f, 0.75f);
-    line(&y, "[A]Done [Y]Items [X]Steps [+]Setup [-]Chains [B]Close", 0.7f, 0.8f, 0.75f);
+    line(&y, "[A] Done [L/R] Tabs [Y] Items [X] Steps [+] Setup [-] Chains [B] Close", 0.7f, 0.8f, 0.75f);
 }
 static void drawConfirm(void) {
     panel(240, 230, 800, 190);
@@ -532,16 +555,17 @@ static void drawSteps(void) {
 // Read-only list for the whole remaining chain, using the exact same green/dark palette as the roadmap.
 static void drawShopping(void) {
     char text[160];
-    float y = 34;
+    float y = 185;
     int purchases[BREED_ITEMS], total = 0, kinds = 0, owned = 0, required = 0;
     breedShoppingList(&state, &plan, purchases);
-    panel(30, 20, 1220, 680);
+    panel(120, 171, 1040, 534);
+    drawRoadmapTabs(true);
     snprintf(text, sizeof(text), "Shopping list - %s   [B] close", state.species[0] ? state.species : "no active goal");
     line(&y, text, 1.0f, 0.85f, 0.3f);
     y += ROW;
     if (problem) {
         line(&y, problem, 1.0f, 0.45f, 0.4f);
-        line(&y, "Set a goal with R + D-pad right + R3, then [+] Setup.", 0.7f, 0.8f, 0.75f);
+        line(&y, "Set a goal in the Roadmap tab, then press [+] Setup.", 0.7f, 0.8f, 0.75f);
         return;
     }
     snprintf(text, sizeof(text), "%u breeding steps remaining  |  Item requirements for the full goal", plan.count);
@@ -559,10 +583,10 @@ static void drawShopping(void) {
         line(&y, text, 1.0f, 1.0f, 1.0f);
     }
     if (!kinds) line(&y, "All required items are already in your recorded stock.", 0.5f, 1.0f, 0.6f);
-    y = 606;
+    y = 600;
     snprintf(text, sizeof(text), "To buy: %d items   |   In stock: %d/%d   |   %d item types missing", total, owned, required, kinds);
     line(&y, text, total ? 1.0f : 0.5f, total ? 0.85f : 1.0f, 0.3f + (total ? 0.0f : 0.3f));
-    line(&y, "Uses manually entered inventory; update it in the main roadmap.", 0.7f, 0.8f, 0.75f);
+    line(&y, "[L/R] Roadmap / Shopping   [B] Close   Inventory is entered manually.", 0.7f, 0.8f, 0.75f);
 }
 static void drawVisual(void) {
     char label[150];
@@ -709,10 +733,11 @@ void linuxRoadmapToastDraw(LinuxRoadmapRect rect, LinuxRoadmapText text, LinuxRo
     if (opacity <= 0.0f) return;
     lock();
     char buf[160], first[100], second[100];
-    const float x = 278.0f, y = 22.0f, w = 974.0f, h = 254.0f, tx = x + 22.0f;
+    const float w = 974.0f, x = (1280.0f - w) * 0.5f, y = 22.0f, h = 254.0f, tx = x + 22.0f;
     if (clip) clip(x + 12.0f, y + 6.0f, w - 24.0f, h - 12.0f);
-    rect(x - 3, y - 3, w + 6, h + 6, 0.35f, 0.75f, 0.45f, opacity);
-    rect(x, y, w, h, 0.04f, 0.07f, 0.06f, 0.94f * opacity);
+    rect(x - 2, y - 2, w + 4, h + 4, 0.47f, 0.80f, 0.84f, opacity);
+    rect(x, y, w, h, 0.063f, 0.11f, 0.14f, 0.94f * opacity);
+    rect(x, y, w, 6, 0.47f, 0.80f, 0.84f, opacity);
     text(tx, y + 13, "NXpanded - Quick progress", 43, 1.0f, 0.85f, 0.3f);
     snprintf(buf, sizeof(buf), "Goal: %.23s   |   %u step%s remaining", state.species[0] ? state.species : "(not set)", plan.count, plan.count == 1 ? "" : "s");
     text(tx, y + 45, buf, 43, 0.7f, 0.85f, 0.75f);

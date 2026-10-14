@@ -5,3 +5,5 @@
 float nxTextMarqueeOffset(size_t characters, float advance, float available_width, uint64_t elapsed_ns);
 // Find the next line boundary for simple menu descriptions.
 size_t nxTextWrapLine(const char *s, size_t columns);
+
+float nxTextMarqueePixels(float pixel_width, float available_width, uint64_t elapsed_ns);

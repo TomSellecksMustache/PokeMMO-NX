@@ -104,6 +104,44 @@ static void menuPress(uint32_t buttons) {
     menu_snapshot.timestamp_ns += 10000000ull;
     linuxRoadmapFeed(&menu_snapshot);
 }
+static bool saw_shop, saw_road;
+static void tabText(float x, float y, const char *str, unsigned chars, float r, float g, float b) {
+    (void)x; (void)y; (void)chars; (void)r; (void)g; (void)b;
+    if (strstr(str, "Shopping list -")) saw_shop = true;
+    if (strstr(str, "Breeding roadmap -") || strstr(str, "Next step -")) saw_road = true;
+}
+static float toast_first_x = -1, toast_first_w = -1;
+static void toastRect(float x, float y, float w, float h, float r, float g, float b, float a) {
+    (void)y; (void)h; (void)r; (void)g; (void)b; (void)a;
+    if (toast_first_x < 0) { toast_first_x = x; toast_first_w = w; }
+}
+static void unifiedRoadmap(void) {
+    // The two pages are navigated with shoulder buttons, no touchscreen input.
+    menu_snapshot = (LinuxInputSnapshot){0};
+    menu_snapshot.gamepad = true;
+    menu_snapshot.timestamp_ns = 12000000000ull;
+    linuxRoadmapShowShopping();
+    linuxRoadmapFeed(&menu_snapshot);
+    saw_shop = saw_road = false;
+    linuxRoadmapDraw(fakeRect, tabText, NULL);
+    assert(saw_shop && !saw_road);
+    menuPress(1u << 9); // L selects roadmap from shopping
+    saw_shop = saw_road = false;
+    linuxRoadmapDraw(fakeRect, tabText, NULL);
+    assert(saw_road && !saw_shop);
+    menuPress(1u << 10); // R selects shopping
+    saw_shop = saw_road = false;
+    linuxRoadmapDraw(fakeRect, tabText, NULL);
+    assert(saw_shop && !saw_road);
+    menuPress(1u << 1); // B closes whichever tab is active
+    assert(!linuxRoadmapOpen());
+    menu_snapshot.buttons = 0;
+    linuxRoadmapFeed(&menu_snapshot);
+    assert(!linuxRoadmapCapturesInput());
+    linuxRoadmapToastShow(13000000000ull);
+    linuxRoadmapToastDraw(toastRect, fakeText, NULL, 1.0f);
+    assert(fabsf((toast_first_x + toast_first_w * 0.5f) - 640.0f) < 0.01f);
+}
 static void visualMenu(void) {
     assert(LINUX_VISUAL_TABS == 3);
     assert(linuxVisualMenuRows(0) == 6 && linuxVisualMenuRows(1) == 6);
@@ -183,6 +221,7 @@ int main(void) {
     shortcuts();
     toast();
     visualMenu();
+    unifiedRoadmap();
     puts("Breeding shortcut, toast, and controller-tab tests passed.");
     return 0;
 }
