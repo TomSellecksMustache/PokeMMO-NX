@@ -8,14 +8,20 @@
 #include "linux_updater.h"
 #include "nxpanded_costs.h"
 #include "nxpanded_hub_reference.h"
+#include "nxpanded_market.h"
+#include "nxpanded_egg_paths.h"
 #include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
+#include <strings.h>
 
 #define FILE_PATH "sdmc:/switch/PokeMMO-NXpanded/breeding.csv"  // the chain being worked on
 #define CHAIN_DIR "sdmc:/switch/PokeMMO-NXpanded/chains"
 #define COST_PATH "sdmc:/switch/PokeMMO-NXpanded/breeding-prices.cfg"
+#define MARKET_PATH "sdmc:/switch/PokeMMO-NXpanded/market-prices.tsv"
+#define EGG_ROUTES_PATH "sdmc:/switch/PokeMMO-NXpanded/egg-routes.tsv"
 #define HUB_MOVES_PATH "sdmc:/switch/PokeMMO-NXpanded/hub-egg-moves.tsv"         // the ones put aside, a file each
 #define CHAIN_PATH CHAIN_DIR "/c%02d.csv"
 #define CHAINS 32
@@ -37,7 +43,7 @@
 #define BTN_DOWN (1u << 12)
 #define BTN_LEFT (1u << 13)
 #define BTN_RIGHT (1u << 14)
-typedef enum { VIEW_NEXT, VIEW_CONFIRM, VIEW_STEPS, VIEW_ITEMS, VIEW_SETUP, VIEW_STOCK, VIEW_EDIT, VIEW_PICK, VIEW_CHAINS, VIEW_SHOPPING, VIEW_COSTS, VIEW_MOVES, VIEW_VISUAL, VIEW_HUB, VIEW_LOADER, VIEW_MODS, VIEW_UPDATES } View;
+typedef enum { VIEW_NEXT, VIEW_CONFIRM, VIEW_STEPS, VIEW_ITEMS, VIEW_SETUP, VIEW_STOCK, VIEW_EDIT, VIEW_PICK, VIEW_CHAINS, VIEW_SHOPPING, VIEW_COSTS, VIEW_MOVES, VIEW_VISUAL, VIEW_HUB, VIEW_LOADER, VIEW_MARKET, VIEW_UPDATES } View;
 typedef enum { ASK_DONE, ASK_REMOVE, ASK_CHAIN } Ask;
 typedef struct {
     int slot;
@@ -47,6 +53,11 @@ typedef struct {
 static BreedState state;
 static BreedPlan plan;
 static NxCosts prices;
+static NxMarketSnapshot market;
+static NxEggRoutes routes;
+static NxEggPath route_preview;
+static int egg_selected;
+static bool market_ready, route_ready;
 static NxHubEggMove move_notes[NX_HUB_MOVES_MAX];
 static size_t move_note_count;
 static int cost_row;
@@ -79,7 +90,7 @@ static void unlock(void) { atomic_flag_clear_explicit(&guard, memory_order_relea
 static void refresh(void) {  // lock held
     problem = breedProblem(&state);
     plan.count = 0;
-    if (!problem) breedPlan(&state, &plan);
+    if (!problem) breedPlanPriced(&state, prices.prices, &plan);
     if (!breedEggGroups(state.species, eggs, sizeof(eggs))) snprintf(eggs, sizeof(eggs), "Unknown");
 }
 static void finish(void) {  // back to the next step, with everything that was changed saved and planned again
@@ -178,9 +189,12 @@ static void show(View initial) {
     memset(&state, 0, sizeof(state));
     state.nature = state.left = -1;
     if (!breedLoad(FILE_PATH, &state)) breedLoad(FILE_PATH ".tmp", &state);  // the temporary file is what is left if the console went off while saving
-    refresh();
     memset(&prices, 0, sizeof(prices));
     nxCostRead(COST_PATH, &prices);
+    refresh();
+    market_ready=nxMarketLoad(MARKET_PATH,&market);
+    route_ready=nxEggRoutesLoad(EGG_ROUTES_PATH,&routes);
+    egg_selected=0;
     cost_row = 0;
     cost_notice = NULL;
     view = initial == VIEW_HUB || initial == VIEW_SHOPPING || initial == VIEW_VISUAL ? initial : (problem ? VIEW_SETUP : VIEW_NEXT);  // an unset goal may still show its empty shopping list
@@ -325,13 +339,13 @@ static void press(uint32_t pressed) {  // lock held; SDL gamepad buttons
         if (pressed & BTN_A) {
             if (hub_selected==0) view=problem?VIEW_SETUP:VIEW_NEXT;
             if (hub_selected==1) {view=VIEW_LOADER;}
-            if (hub_selected==2) {view=VIEW_MODS;}
+            if (hub_selected==2) {view=VIEW_MARKET;}
             if (hub_selected==3) {view=VIEW_VISUAL;visual_tab=visual_row=0;}
             if (hub_selected==4) {view=VIEW_UPDATES;}
         }
         return;
     }
-    if(view==VIEW_LOADER || view==VIEW_MODS || view==VIEW_UPDATES) {
+    if(view==VIEW_LOADER || view==VIEW_MARKET || view==VIEW_UPDATES) {
         if(pressed & BTN_B) {view=VIEW_HUB;return;}
         if(view==VIEW_UPDATES && (pressed & BTN_A)) {
             snprintf(updater_message,sizeof(updater_message),"Checking GitHub and downloading if newer...");
@@ -342,6 +356,10 @@ static void press(uint32_t pressed) {  // lock held; SDL gamepad buttons
     int steps = (int)plan.count;
     if (view == VIEW_MOVES) {
         if (pressed & BTN_B) view = VIEW_COSTS;
+        if ((pressed & BTN_UP) && egg_selected>0) --egg_selected;
+        if ((pressed & BTN_DOWN) && egg_selected<(int)move_note_count-1) ++egg_selected;
+        if (move_note_count) nxEggFindPath(&routes,&state,state.species,
+                                            move_notes[egg_selected].move,&route_preview);
         return;
     }
     if (view == VIEW_NEXT || view == VIEW_SHOPPING || view == VIEW_COSTS) {
@@ -358,13 +376,32 @@ static void press(uint32_t pressed) {  // lock held; SDL gamepad buttons
             if (pressed & BTN_DOWN) { if (cost_row < (int)NX_COST_COUNT-1) ++cost_row; }
             if (pressed & BTN_X) price_increment = price_increment == 100 ? 1000 : price_increment == 1000 ? 10000 : 100;
             if (pressed & BTN_Y) {
-                move_note_count = nxHubEggMoves(HUB_MOVES_PATH,state.species,move_notes,NX_HUB_MOVES_MAX);
+                move_note_count = 0;
+                // Only explicitly verified records are offered as routes.
+                if (route_ready) for(unsigned i=0;i<routes.count && move_note_count<NX_HUB_MOVES_MAX;i++) {
+                    const NxEggEdge *edge=&routes.edge[i];
+                    if (strcasecmp(edge->receiver,state.species)) continue;
+                    bool already=false;
+                    for(size_t j=0;j<move_note_count;j++)
+                        if(!strcasecmp(move_notes[j].move,edge->move))already=true;
+                    if(already)continue;
+                    snprintf(move_notes[move_note_count].move,sizeof(move_notes[0].move),"%s",edge->move);
+                    snprintf(move_notes[move_note_count].donor,sizeof(move_notes[0].donor),"%s",edge->donor);
+                    move_note_count++;
+                }
+                if (!move_note_count) move_note_count=nxHubEggMoves(HUB_MOVES_PATH,state.species,move_notes,NX_HUB_MOVES_MAX);
+                egg_selected=0;
+                memset(&route_preview,0,sizeof(route_preview));
+                if(move_note_count)nxEggFindPath(&routes,&state,state.species,move_notes[0].move,&route_preview);
                 view = VIEW_MOVES; return;
             }
             if (pressed & (BTN_LEFT | BTN_RIGHT)) {
                 const uint32_t old = prices.prices[cost_row];
                 prices.prices[cost_row] = nxCostAdjust(old, (pressed & BTN_RIGHT) ? 1 : -1, price_increment);
-                if (old != prices.prices[cost_row]) cost_notice = nxCostWrite(COST_PATH, &prices) ? NULL : "Could not save price estimates to SD.";
+                if (old != prices.prices[cost_row]) {
+                    cost_notice = nxCostWrite(COST_PATH, &prices) ? NULL : "Could not save price estimates to SD.";
+                    refresh();
+                }
             }
             return;
         }
@@ -421,7 +458,7 @@ static void press(uint32_t pressed) {  // lock held; SDL gamepad buttons
             if(visual_tab==0 && visual_row==0) {
                 unsigned requested=linuxMsaaRequested();
                 unsigned next=requested==0?2:(requested==2?4:(requested==4?8:0));
-                visual_notice=linuxMsaaSetRequested(next)?"MSAA choice saved. Restart NXpanded to apply.":"Could not save MSAA choice.";
+                visual_notice=linuxMsaaSetRequested(next)?"Edge smoothing applies now; restart for hardware MSAA.":"Could not save MSAA choice.";
                 return;
             }
             unsigned effect = linuxVisualMenuEffect((unsigned)visual_tab, (unsigned)(visual_row-(visual_tab==0?1:0)));
@@ -670,8 +707,9 @@ static void drawShopping(void) {
 }
 static void drawCosts(void) {
     char label[190];
-    NxCostEstimate estimate;
-    nxCostEstimate(&state, &plan, &prices, &estimate);
+    NxMarketEstimate estimate;
+    nxMarketEstimatePlan(&state,&plan,&prices,market_ready?&market:NULL,
+                         (uint64_t)time(NULL),&estimate);
     panel(120, 171, 1040, 534);
     drawRoadmapTabs(2);
     float y = 185;
@@ -682,7 +720,7 @@ static void drawCosts(void) {
         line(&y, "Choose a breeding goal in Roadmap to see item requirements.", 0.9f, 0.87f, 0.75f);
     } else {
         for (unsigned i=0; i<NX_COST_COUNT; ++i) {
-            const int count = i< BREED_ITEMS ? estimate.outstanding[i] : (int)estimate.breeders_to_get;
+            const int count = i< BREED_ITEMS ? estimate.base.outstanding[i] : (int)estimate.base.breeders_to_get;
             if (i== (unsigned)cost_row) drawRect(139,y-2,980,31,0.14f,0.38f,0.55f,0.9f);
             const char *name = i< BREED_ITEMS ? BREED_ITEM_NAMES[i] : "Unowned breeder (estimate)";
             snprintf(label,sizeof(label),"%-24s  x%-3d  %8u / each",name,count,prices.prices[i]);
@@ -696,26 +734,68 @@ static void drawCosts(void) {
         snprintf(label,sizeof(label), "%u items / breeders have no entered price. No live GTL feed.",estimate.unknown_units);
         drawText(150,566,label,82,0.75f,0.88f,0.96f);
     }
-    drawText(150,611,"[Left/Right] Price  [X] Step size  [Y] Egg-move notes  [L/R] Tabs",81,1,1,1);
+    if(market_ready) {
+        snprintf(label,sizeof(label),"Price snapshot: %.36s | %s | %u quoted units",
+                 market.source, estimate.stale?"STALE (manual fallback)":"dated, not live",
+                 estimate.matched_units);
+        drawText(150,590,label,87,0.67f,0.89f,1.0f);
+    }
+    drawText(150,611,"[Left/Right] Price  [X] Step size  [Y] Egg routes  [L/R] Tabs",81,1,1,1);
     snprintf(label,sizeof(label),"Increment: %u PokeYen  |  %s",price_increment,cost_notice?cost_notice:"Prices stay on your SD card. [B] Close");
     drawText(150,649,label,90,cost_notice?1.0f:0.77f,cost_notice?0.5f:0.87f,0.98f);
 }
 static void drawMoves(void) {
-    char label[170];
+    char label[180];
     panel(120, 108, 1040, 555);
-    drawText(150,132,"EGG MOVES  |  Offline notes",60,1.0f,0.95f,1.0f);
-    snprintf(label,sizeof(label),"Goal: %.23s  |  Egg groups: %.63s",state.species[0]?state.species:"(not set)",eggs);
-    drawText(150,180,label,85,0.85f,0.96f,1.0f);
+    drawText(150,132,"EGG MOVE ROUTES | verified local data",60,1.0f,0.95f,1.0f);
+    snprintf(label,sizeof(label),"Goal: %.23s  |  Egg groups: %.60s",state.species[0]?state.species:"(not set)",eggs);
+    drawText(150,175,label,88,0.85f,0.96f,1.0f);
     if (!move_note_count) {
-        drawText(150,265,"No verified egg-move notes for this goal.",70,1,1,1);
-        drawText(150,315,"Optional offline reference: hub-egg-moves.tsv",75,0.75f,0.87f,0.99f);
+        drawText(150,253,"No verified move routes installed for this goal.",70,1,1,1);
+        drawText(150,298,"See docs/EGG_AND_MARKET.md for offline import requirements.",75,0.75f,0.87f,0.99f);
+    } else {
+        for (size_t i=0;i<move_note_count;++i) {
+            if((int)i==egg_selected) drawRect(142,229+(float)i*41,985,37,0.16f,0.45f,0.63f,0.84f);
+            snprintf(label,sizeof(label),"%s%.51s",(int)i==egg_selected?"> ":"  ",move_notes[i].move);
+            drawText(161,231+(float)i*41,label,78,1,1,1);
+        }
+        float y=468;
+        if(route_preview.hops) {
+            snprintf(label,sizeof(label),"Donor route (%u breeding transfer%s):",route_preview.hops,
+                     route_preview.hops==1?"":"s");
+            drawText(151,y,label,80,0.64f,0.97f,0.83f);
+            y+=29;
+            for(unsigned i=0;i<=route_preview.hops;i++) {
+                snprintf(label,sizeof(label),"%s%s",i?" <  ":"",route_preview.species[i]);
+                drawText(151+(float)i*150,y,label,29,1,1,1);
+            }
+            drawText(151,y+38,route_preview.owned_source?"Terminal donor recorded in stock.":"Terminal donor must be acquired.",88,0.87f,0.92f,1);
+        } else {
+            drawText(151,y,"No complete VERIFIED route. Do not assume this donor is legal.",87,1.0f,0.68f,0.53f);
+        }
     }
-    for (size_t i=0;i<move_note_count;++i) {
-        snprintf(label,sizeof(label),"%.49s   <-   %.49s",move_notes[i].move,move_notes[i].donor);
-        drawText(150,250+(float)i*56,label,84,1,1,1);
+    drawText(150,615,"[Up/Down] Select  [B] Costs  |  Confirm moves in PokeMMO before breeding.",89,0.75f,0.87f,0.95f);
+}
+static void drawMarket(void) {
+    char label[180];
+    panel(120,110,1040,550);
+    drawText(147,138,"MARKET | NXpanded offline price snapshot",63,1.0f,0.94f,1.0f);
+    if(!market_ready) {
+        drawText(147,224,"No market snapshot installed.",55,1,1,1);
+        drawText(147,270,"You can still set prices manually in Breeding > Costs.",85,0.77f,0.92f,1);
+    } else {
+        snprintf(label,sizeof(label),"Source: %.45s",market.source);
+        drawText(147,224,label,67,0.85f,1.0f,0.92f);
+        snprintf(label,sizeof(label),"Entries: %u   |   Rejected: %u",market.count,market.rejected);
+        drawText(147,268,label,67,0.9f,0.95f,1.0f);
+        uint64_t now=(uint64_t)time(NULL);
+        bool stale=!now||now<market.as_of_utc||(now-market.as_of_utc)>604800u;
+        drawText(147,313,stale?"Status: STALE - old quotes will not override manual costs.":
+                 "Status: recent offline estimates (not live GTL prices).",87,stale?1.0f:0.65f,stale?0.68f:1.0f,0.79f);
     }
-    drawText(150,574,"Egg-move sources must be verified in game before breeding.",84,0.75f,0.87f,0.95f);
-    drawText(150,619,"[B] Return to Costs",55,1,1,1);
+    drawText(147,468,"Add market-prices.tsv in /switch/PokeMMO-NXpanded/",84,0.89f,0.95f,1.0f);
+    drawText(147,515,"No account login, screen scraping or automatic trading.",87,0.77f,0.91f,1.0f);
+    drawText(147,606,"[B] Return to hub",50,1,1,1);
 }
 static void hubTile(float x,float y,float w,float h,const char *title,const char *description,int id) {
     bool chosen=hub_selected==id;
@@ -737,7 +817,7 @@ static void drawHub(void) {
     if(drawClip)drawClip(36,176,1208,508);
     hubTile(45,215,470,158,"Breeding Planner","Plan your next breed and shopping",0);
     hubTile(765,215,470,158,"Loader Options","Loader settings (coming soon)",1);
-    hubTile(45,399,470,158,"Mods","Mod management (coming soon)",2);
+    hubTile(45,399,470,158,"Market","Offline prices and data sources",2);
     hubTile(765,399,470,158,"Visual Enhancements","Shaders and MSAA",3);
     drawRect(552,216,177,342,0.12f,0.21f,0.31f,1.0f);
     drawRect(559,223,163,328,0.20f,0.36f,0.50f,1.0f);
@@ -795,14 +875,14 @@ static void drawVisual(void) {
         float y=202+(float)i*47;
         if((int)i==visual_row)drawRect(42,y-7,576,40,0.15f,0.37f,0.52f,0.93f);
         if(effect==VISUAL_EFFECT_COUNT)
-            snprintf(label,sizeof(label),"MSAA: %ux selected / %ux active",linuxMsaaRequested(),linuxMsaaActive());
+            snprintf(label,sizeof(label),"AA: %ux requested / %ux EGL active",linuxMsaaRequested(),linuxMsaaActive());
         else snprintf(label,sizeof(label),"%s  [ %s ]",linuxVisualEffectName(effect),enabled?"ON":"OFF");
         if(drawClip)drawClip(53,y-3,550,35);
         drawText(59,y,label,67,enabled?0.70f:1.0f,1.0f,enabled?0.83f:1.0f);
     }
     if(drawClip)drawClip(43,560,567,100);
     unsigned selected=(tab==0&&visual_row==0)?VISUAL_EFFECT_COUNT:linuxVisualMenuEffect(tab,(unsigned)(visual_row-(tab==0?1:0)));
-    const char *description=selected==VISUAL_EFFECT_COUNT?"MSAA requires restart; unsupported values fall back.":linuxVisualMenuDescription(selected);
+    const char *description=selected==VISUAL_EFFECT_COUNT?"Edge smoothing is live; hardware MSAA may require restart.":linuxVisualMenuDescription(selected);
     drawText(49,551,description,88,0.84f,0.94f,1.0f);
     drawText(49,586,"[L/R] Tabs  [Up/Down] Select  [A] Toggle  [B] Close",82,1.0f,1.0f,1.0f);
     int status=linuxVisualEffectsStatus();
@@ -945,7 +1025,7 @@ void linuxRoadmapDraw(LinuxRoadmapRect rect, LinuxRoadmapText text, LinuxRoadmap
     lock();
     if (view == VIEW_HUB) drawHub();
     else if (view == VIEW_LOADER) drawEmptyMenu("Loader Options");
-    else if (view == VIEW_MODS) drawEmptyMenu("Mods");
+    else if (view == VIEW_MARKET) drawMarket();
     else if (view == VIEW_UPDATES) drawEmptyMenu("Check for Updates");
     else if (view == VIEW_VISUAL)
         drawVisual();

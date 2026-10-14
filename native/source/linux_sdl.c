@@ -427,28 +427,28 @@ static void *sdlGlCreateContext(void *window) {
     const unsigned wanted = linuxMsaaRequested();
     const unsigned options[] = {8u,4u,2u,0u};
     bool matched = false;
+    EGLint config_samples = 0;
     for (unsigned i=0;i<4;i++) {
-        unsigned samples=options[i];
-        if(samples>wanted)continue;
+        const unsigned samples=options[i];
+        if(samples>wanted) continue;
         const EGLint attrs[] = {EGL_RENDERABLE_TYPE,EGL_OPENGL_BIT,
              EGL_SURFACE_TYPE,EGL_WINDOW_BIT,EGL_RED_SIZE,8,EGL_GREEN_SIZE,8,
              EGL_BLUE_SIZE,8,EGL_ALPHA_SIZE,8,EGL_DEPTH_SIZE,
              gl_attributes[6]?gl_attributes[6]:16,
              EGL_SAMPLE_BUFFERS,samples?1:0,EGL_SAMPLES,(EGLint)samples,EGL_NONE};
         count=0;
-        if(eglChooseConfig(egl_display,attrs,&config,1,&count)&&count>0){matched=true;break;}
+        if(!eglChooseConfig(egl_display,attrs,&config,1,&count)||count<=0) continue;
+        egl_surface=eglCreateWindowSurface(egl_display,config,(EGLNativeWindowType)native,NULL);
+        if(egl_surface==EGL_NO_SURFACE) {
+            trace("sdl.MSAA surface unavailable samples=%u error=0x%x",samples,eglGetError());
+            continue;
+        }
+        eglGetConfigAttrib(egl_display,config,EGL_SAMPLES,&config_samples);
+        matched=true;
+        break;
     }
-    if(!matched){trace("sdl.GL_CreateContext=FAIL stage=config");return NULL;}
-    EGLint actual=0;
-    eglGetConfigAttrib(egl_display,config,EGL_SAMPLES,&actual);
-    linuxMsaaSetActive(actual>0?(unsigned)actual:0);
-    trace("sdl.MSAA requested=%u actual=%d",wanted,actual);
+    if(!matched){trace("sdl.GL_CreateContext=FAIL stage=config_surface");return NULL;}
     egl_config = config;
-    egl_surface = eglCreateWindowSurface(egl_display, config, (EGLNativeWindowType)native, NULL);
-    if (egl_surface == EGL_NO_SURFACE) {
-        trace("sdl.GL_CreateContext=FAIL stage=surface egl_error=0x%x", eglGetError());
-        return NULL;
-    }
     int major = gl_attributes[17] ? gl_attributes[17] : 2, minor = gl_attributes[18];
     const EGLint context_attributes[] = {EGL_CONTEXT_MAJOR_VERSION_KHR, major, EGL_CONTEXT_MINOR_VERSION_KHR, minor ? minor : 1, EGL_NONE};
     egl_context = eglCreateContext(egl_display, config, EGL_NO_CONTEXT, context_attributes);
@@ -460,6 +460,21 @@ static void *sdlGlCreateContext(void *window) {
         trace("sdl.GL_CreateContext=FAIL stage=make_current egl_error=0x%x", eglGetError());
         return NULL;
     }
+    /* Query the actual default framebuffer, not merely the chosen EGL config.
+     * PokeMMO may render its scene to an offscreen FBO where window MSAA has
+     * no effect; a separate image-space edge pass is applied when requested. */
+    typedef void (*GlGetInteger)(unsigned, int *);
+    GlGetInteger get_integer = (GlGetInteger)eglGetProcAddress("glGetIntegerv");
+    int framebuffer_samples = 0, framebuffer_buffers = 0;
+    if(get_integer) {
+        get_integer(0x80A8u, &framebuffer_buffers); /* GL_SAMPLE_BUFFERS */
+        get_integer(0x80A9u, &framebuffer_samples); /* GL_SAMPLES */
+    }
+    unsigned active_samples = framebuffer_buffers>0 && framebuffer_samples>0 ?
+        (unsigned)framebuffer_samples : 0;
+    linuxMsaaSetActive(active_samples);
+    trace("sdl.MSAA requested=%u EGL=%d default_framebuffer=%u fallback=screen_space",
+          wanted,config_samples,active_samples);
     eglSwapInterval(egl_display, (EGLint)swap_interval);
     ++contexts_created;
     trace("sdl.GL_CreateContext=PASS version=%d.%d context=%p", major, minor ? minor : 1, egl_context);

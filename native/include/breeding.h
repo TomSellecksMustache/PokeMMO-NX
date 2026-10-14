@@ -1,6 +1,7 @@
 #pragma once
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 // The breeding planner: from a target (species, nature, stats at 31) and what the player owns, the ordered breeds that make it. Plain C, no console calls.
 #define BREED_STATS 6u
@@ -45,6 +46,8 @@ extern const char *const BREED_NATURES[BREED_NATURE_COUNT];
 
 const char *breedProblem(const BreedState *state);  // why there is nothing to plan, NULL when there is
 void breedPlan(const BreedState *state, BreedPlan *plan);
+// Price-aware planning among near-shortest legal IV trees. Zero = unknown, not free.
+void breedPlanPriced(const BreedState *state, const uint32_t costs[BREED_ITEMS+1], BreedPlan *plan);
 // For the entire remaining goal, not just the next step: quantities to buy after subtracting recorded stock.
 void breedShoppingList(const BreedState *state, const BreedPlan *plan, int to_buy[BREED_ITEMS]);
 void breedLabel(const BreedState *state, const BreedPlan *plan, BreedParent parent, char *out, size_t size);

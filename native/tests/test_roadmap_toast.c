@@ -231,8 +231,8 @@ static void hubText(float x,float y,const char *str,unsigned n,float r,float g,f
     (void)x;(void)y;(void)n;(void)r;(void)g;(void)b;
     if (strstr(str,"Check for Updates")) hub_title_seen=true;
     if (strstr(str,"Loader Options")) loader_title_seen=true;
-    if (strstr(str,"Mods")) mod_title_seen=true;
-    if (strstr(str,"MSAA:")) msaa_seen=true;
+    if (strstr(str,"Market")) mod_title_seen=true;
+    if (strstr(str,"AA:")) msaa_seen=true;
 }
 static void hubMenu(void) {
     menu_snapshot=(LinuxInputSnapshot){0};menu_snapshot.gamepad=true;
@@ -259,7 +259,7 @@ static bool saw_cost, saw_move_notes;
 static void costText(float x,float y,const char *str,unsigned chars,float r,float g,float b){
     (void)x;(void)y;(void)chars;(void)r;(void)g;(void)b;
     if(strstr(str,"Breeding cost estimate"))saw_cost=true;
-    if(strstr(str,"EGG MOVES"))saw_move_notes=true;
+    if(strstr(str,"EGG MOVE ROUTES"))saw_move_notes=true;
 }
 static bool saw_compact_visual;
 static void visualRect(float x,float y,float w,float h,float r,float g,float b,float a){

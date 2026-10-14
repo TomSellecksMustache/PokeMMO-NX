@@ -2,6 +2,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <strings.h>
 
@@ -29,9 +30,12 @@ typedef struct {
     BreedPlan plan;
     int missing, total;
     int first_ready, first_stock, first_items, stock_used;
+    uint64_t priced_cost;
+    unsigned price_unknown;
 } Eval;
 typedef struct {
     const BreedState *state;
+    const uint32_t *prices;
     Eval work, best;
     bool has_best;
     int pass, shortest;
@@ -171,6 +175,8 @@ static void evaluate(const BreedState *state, const unsigned char *order, unsign
             if (!step->have[j]) eval->missing++;
             if (step->parent[j].kind == 1) eval->stock_used++;
         }
+    eval->priced_cost = 0;
+    eval->price_unknown = 0;
     eval->first_ready = eval->first_stock = eval->first_items = 0;
     if (eval->plan.count) {
         const BreedStep *first = &eval->plan.steps[0];
@@ -181,7 +187,13 @@ static void evaluate(const BreedState *state, const unsigned char *order, unsign
         eval->first_ready = eval->first_stock == 2 && eval->first_items == 2;
     }
 }
-static bool better(const Eval *a, const Eval *b) {
+static bool better(const Eval *a, const Eval *b, bool price_mode) {
+    if (price_mode) {
+        if (a->price_unknown != b->price_unknown)
+            return a->price_unknown < b->price_unknown;
+        if (a->priced_cost != b->priced_cost)
+            return a->priced_cost < b->priced_cost;
+    }
     if (a->missing != b->missing) return a->missing < b->missing;
     if (a->plan.count != b->plan.count) return a->plan.count < b->plan.count;
     if (a->first_ready != b->first_ready) return a->first_ready > b->first_ready;
@@ -193,10 +205,24 @@ static bool better(const Eval *a, const Eval *b) {
 // Every order of the stats is tried (the first pass finds the shortest route, the second keeps the best one within 3 breeds of it).
 static void visit(Search *search, const unsigned char *order, unsigned count) {
     evaluate(search->state, order, count, &search->work);
+    if (search->prices) {
+        for (unsigned i=0;i<BREED_ITEMS;i++) {
+            int available=search->state->have[i]>0?search->state->have[i]:0;
+            int tobuy=search->work.plan.need[i]>available ? search->work.plan.need[i]-available:0;
+            if (!tobuy)continue;
+            if (search->prices[i])search->work.priced_cost += (uint64_t)tobuy*search->prices[i];
+            else search->work.price_unknown += (unsigned)tobuy;
+        }
+        for (unsigned j=0;j<search->work.plan.count;j++)
+            for(unsigned k=0;k<2;k++)if(search->work.plan.steps[j].parent[k].kind==0) {
+                if(search->prices[BREED_ITEMS])search->work.priced_cost+=search->prices[BREED_ITEMS];
+                else search->work.price_unknown++;
+            }
+    }
     int length = (int)search->work.plan.count;
     if (search->pass == 0) {
         if (length < search->shortest) search->shortest = length;
-    } else if (length <= search->shortest + 3 && (!search->has_best || better(&search->work, &search->best))) {
+    } else if (length <= search->shortest + 3 && (!search->has_best || better(&search->work, &search->best,search->prices!=NULL))) {
         search->best = search->work;
         search->has_best = true;
     }
@@ -222,7 +248,7 @@ const char *breedProblem(const BreedState *state) {
     if (!(state->ivs & ((1u << BREED_STATS) - 1u))) return "No 31 IV stats chosen.";
     return NULL;
 }
-void breedPlan(const BreedState *state, BreedPlan *plan) {
+static void breedPlanInternal(const BreedState *state, const uint32_t *prices, BreedPlan *plan) {
     unsigned char order[BREED_STATS], picked[BREED_STATS];
     unsigned count = 0;
     for (unsigned i = 0; i < BREED_STATS; ++i)
@@ -236,6 +262,7 @@ void breedPlan(const BreedState *state, BreedPlan *plan) {
     static Search search;  // large: not on the stack
     memset(&search, 0, sizeof(search));
     search.state = state;
+    search.prices = prices;
     search.shortest = 1 << 20;
     for (search.pass = 0; search.pass < 2; ++search.pass) {
         if (count > 2)
@@ -245,6 +272,12 @@ void breedPlan(const BreedState *state, BreedPlan *plan) {
     }
     *plan = search.best.plan;
     plan->extra = (int)plan->count - search.shortest;
+}
+void breedPlan(const BreedState *state, BreedPlan *plan) {breedPlanInternal(state,NULL,plan);}
+void breedPlanPriced(const BreedState *state, const uint32_t costs[BREED_ITEMS+1], BreedPlan *plan) {
+    bool has_price=false;
+    if (costs)for (unsigned i=0;i<BREED_ITEMS+1;i++)if(costs[i])has_price=true;
+    breedPlanInternal(state,has_price?costs:NULL,plan);
 }
 void breedShoppingList(const BreedState *state, const BreedPlan *plan, int to_buy[BREED_ITEMS]) {
     for (unsigned i = 0; i < BREED_ITEMS; ++i) {

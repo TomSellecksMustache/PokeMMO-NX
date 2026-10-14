@@ -2,6 +2,7 @@
 // final backbuffer; game-owned textures, FBOs, shaders and UI are untouched.
 // This runs before NXpanded's native overlays so their text stays sharp.
 #include "linux_visual_effects.h"
+#include "linux_msaa.h"
 #include <EGL/egl.h>
 #include <stdatomic.h>
 #include <string.h>
@@ -71,7 +72,7 @@ static struct {
 } gl;
 static GLuint program, captured;
 static unsigned texture_width, texture_height;
-static GLint texel_uniform, scene_uniform, effect_uniform[VISUAL_EFFECT_COUNT], extra_uniform;
+static GLint texel_uniform, scene_uniform, effect_uniform[VISUAL_EFFECT_COUNT], extra_uniform, aa_uniform;
 static atomic_int status; // 0 before first active frame, 1 ready, -1 unavailable
 
 static const char *const vertex_source =
@@ -84,6 +85,7 @@ static const char *const fragment_source =
     "uniform int tilt, bloom, grade, soften, vignette, fxaa, vibrance, contrast, highlights, sharpen, shadows, haze;\n"
     "uniform int wideGlow, focus, painter;\n"
     "uniform int u13;\n"
+    "uniform int aaLevel;\n"
     "void main() {\n"
     "  vec2 uv = gl_TexCoord[0].xy;\n"
     "  vec3 base = texture2D(scene, uv).rgb;\n"
@@ -97,15 +99,16 @@ static const char *const fragment_source =
     "               texture2D(scene, uv-vec2(d.x,d.y)).rgb) * 0.25;\n"
     "    color = mix(color, sm, 0.28);\n"
     "  }\n"
-    "  if (fxaa != 0 || sharpen != 0) {\n"
+    "  if (fxaa != 0 || aaLevel != 0 || sharpen != 0) {\n"
     "    vec3 a = texture2D(scene, uv+vec2(pixel.x,0.0)).rgb;\n"
     "    vec3 b = texture2D(scene, uv-vec2(pixel.x,0.0)).rgb;\n"
     "    vec3 c = texture2D(scene, uv+vec2(0.0,pixel.y)).rgb;\n"
     "    vec3 d = texture2D(scene, uv-vec2(0.0,pixel.y)).rgb;\n"
     "    vec3 avg = (a+b+c+d)*0.25;\n"
-    "    if (fxaa != 0) {\n"
+    "    if (fxaa != 0 || aaLevel != 0) {\n"
     "      float contrastEdge = abs(dot(base-avg, vec3(0.299,0.587,0.114)));\n"
-    "      color = mix(color, avg, smoothstep(0.045,0.20,contrastEdge)*0.32);\n"
+    "      float strength = aaLevel >= 8 ? 0.70 : (aaLevel >= 4 ? 0.55 : (aaLevel >= 2 ? 0.42 : 0.32));\n"
+    "      color = mix(color, avg, smoothstep(0.025,0.16,contrastEdge)*strength);\n"
     "    }\n"
     "    if (sharpen != 0) color = clamp(color+(base-avg)*0.30,0.0,1.0);\n"
     "  }\n"
@@ -306,13 +309,14 @@ static bool initialize(void) {
     for (unsigned i = 0; i < VISUAL_EFFECT_COUNT; ++i)
         effect_uniform[i] = gl.GetUniformLocation(program, uniforms[i]);
     extra_uniform = gl.GetUniformLocation(program, "u13");
+    aa_uniform = gl.GetUniformLocation(program,"aaLevel");
     gl.GenTextures(1, &captured);
     return captured != 0;
 }
 int linuxVisualEffectsStatus(void) { return atomic_load(&status); }
 void linuxVisualEffectsRender(unsigned width, unsigned height) {
     uint32_t mask = linuxVisualEffectMask();
-    if (!(mask || linuxVisualEffectsPulseActive()) || !width || !height || width > 3840 || height > 2160 || atomic_load(&status) < 0) return;
+    if (!(mask || linuxVisualEffectsPulseActive() || linuxMsaaRequested()) || !width || !height || width > 3840 || height > 2160 || atomic_load(&status) < 0) return;
     if (!atomic_load(&status)) {
         if (!initialize()) { atomic_store(&status, -1); return; }
         atomic_store(&status, 1);
@@ -363,6 +367,8 @@ void linuxVisualEffectsRender(unsigned width, unsigned height) {
         for (unsigned i = 0; i < VISUAL_EFFECT_COUNT; ++i)
             gl.Uniform1i(effect_uniform[i], !!(mask & (1u << i)));
         gl.Uniform1i(extra_uniform, linuxVisualEffectsPulseActive() ? 1 : 0);
+        /* Independent image-space AA: remains visible when Java uses its own FBO. */
+        gl.Uniform1i(aa_uniform, (GLint)linuxMsaaRequested());
         gl.Color4f(1, 1, 1, 1);
         gl.Begin(GL_QUADS);
         gl.TexCoord2f(0, 0); gl.Vertex2f(-1, -1);
