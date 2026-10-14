@@ -569,17 +569,22 @@ static void drawVisual(void) {
     const unsigned tab = (unsigned)visual_tab;
     panel(150, 40, 980, 615);
     drawText(180, 64, "NXpanded - Visual Enhancements", 45, 1.0f, 0.85f, 0.3f);
-    // Both tabs are always visible and selected with L/R, not touch.
+    // Three tabs share the available width; shoulders work in either direction.
+    static const char *const tabs[] = {
+        "1  Colour & detail", "2  Light & focus", "3  GPU intensive"
+    };
     for (unsigned t = 0; t < LINUX_VISUAL_TABS; ++t) {
-        const float x = t == 0 ? 171.0f : 635.0f;
+        const float x = 171.0f + (float)t * 313.0f;
         const bool current = t == tab;
-        drawRect(x, 114, 455, 49, current ? 0.19f : 0.08f, current ? 0.39f : 0.15f,
+        drawRect(x, 114, 302, 49, current ? 0.19f : 0.08f, current ? 0.39f : 0.15f,
                  current ? 0.28f : 0.12f, 1.0f);
-        drawText(x + 14, 126, t == 0 ? "1  Colour & detail" : "2  Light & focus", 22,
+        drawText(x + 13, 126, tabs[t], 20,
                  current ? 1.0f : 0.68f, current ? 0.95f : 0.75f, current ? 0.5f : 0.7f);
     }
-    drawText(180, 188, tab == 0 ? "Six lightweight adjustments" : "Six optional image effects", 49,
-             0.7f, 0.85f, 0.75f);
+    const char *subtitle = tab == 0 ? "Six lightweight adjustments" :
+                           tab == 1 ? "Six optional image effects" :
+                                      "Three experimental, GPU-heavy filters";
+    drawText(180, 188, subtitle, 56, 0.7f, 0.85f, 0.75f);
     for (unsigned i = 0; i < linuxVisualMenuRows(tab); ++i) {
         const unsigned effect = linuxVisualMenuEffect(tab, i);
         const bool enabled = linuxVisualEffectEnabled(effect);
@@ -589,6 +594,8 @@ static void drawVisual(void) {
         drawText(198, y, label, 43, enabled ? 0.55f : 1.0f,
                  enabled ? 1.0f : 0.85f, enabled ? 0.6f : 0.65f);
     }
+    if (tab == 2)
+        drawText(180, 438, "Higher GPU cost. Enable one at a time to test frame rate.", 70, 1.0f, 0.72f, 0.45f);
     unsigned selected = linuxVisualMenuEffect(tab, (unsigned)visual_row);
     drawText(180, 524, linuxVisualMenuDescription(selected), 50, 0.75f, 0.90f, 0.78f);
     drawText(180, 553, "[L/R] tabs   [Up/Down] select   [A] toggle   [B] close", 52, 1.0f, 1.0f, 1.0f);

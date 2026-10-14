@@ -63,7 +63,7 @@ static void toast(void) {
 }
 // Simulate menu input using only the Switch controller, never touch.
 static LinuxInputSnapshot menu_snapshot;
-static bool seen_grade, seen_vignette, seen_soft, seen_tilt, seen_bloom, seen_title, seen_tab2;
+static bool seen_grade, seen_vignette, seen_soft, seen_tilt, seen_bloom, seen_title, seen_tab2, seen_tab3, seen_wide, seen_focus, seen_painter;
 static void fakeRect(float x, float y, float w, float h, float r, float g, float b, float a) {
     (void)x; (void)y; (void)w; (void)h; (void)r; (void)g; (void)b; (void)a;
 }
@@ -71,6 +71,10 @@ static void fakeText(float x, float y, const char *str, unsigned chars, float r,
     (void)x; (void)y; (void)chars; (void)r; (void)g; (void)b;
     if (strstr(str, "NXpanded - Visual Enhancements")) seen_title = true;
     if (strstr(str, "Six optional image effects")) seen_tab2 = true;
+    if (strstr(str, "Three experimental, GPU-heavy filters")) seen_tab3 = true;
+    if (strstr(str, "Wide cinematic glow") && strstr(str, "[ ")) seen_wide = true;
+    if (strstr(str, "Cinematic focus") && strstr(str, "[ ")) seen_focus = true;
+    if (strstr(str, "Painterly smoothing") && strstr(str, "[ ")) seen_painter = true;
     if (strstr(str, "Colour grading") && strstr(str, "[ ")) seen_grade = true;
     if (strstr(str, "Vignette") && strstr(str, "[ ")) seen_vignette = true;
     if (strstr(str, "Soften pixels") && strstr(str, "[ ")) seen_soft = true;
@@ -78,10 +82,14 @@ static void fakeText(float x, float y, const char *str, unsigned chars, float r,
     if (strstr(str, "Soft bloom") && strstr(str, "[ ")) seen_bloom = true;
 }
 static void inspectTab(int expected_tab) {
-    seen_grade = seen_vignette = seen_soft = seen_tilt = seen_bloom = seen_title = seen_tab2 = false;
+    seen_grade = seen_vignette = seen_soft = seen_tilt = seen_bloom = seen_title = seen_tab2 = seen_tab3 = seen_wide = seen_focus = seen_painter = false;
     linuxRoadmapDraw(fakeRect, fakeText, NULL);
     assert(seen_title);
     assert(seen_tab2 == (expected_tab == 1));
+    assert(seen_tab3 == (expected_tab == 2));
+    assert(seen_wide == (expected_tab == 2));
+    assert(seen_focus == (expected_tab == 2));
+    assert(seen_painter == (expected_tab == 2));
     assert(seen_grade == (expected_tab == 0));
     assert(seen_vignette == (expected_tab == 0));
     assert(seen_soft == (expected_tab == 1));
@@ -97,9 +105,13 @@ static void menuPress(uint32_t buttons) {
     linuxRoadmapFeed(&menu_snapshot);
 }
 static void visualMenu(void) {
-    assert(LINUX_VISUAL_TABS == 2);
+    assert(LINUX_VISUAL_TABS == 3);
     assert(linuxVisualMenuRows(0) == 6 && linuxVisualMenuRows(1) == 6);
-    assert(linuxVisualMenuRows(2) == 0);
+    assert(linuxVisualMenuRows(2) == 3 && linuxVisualMenuRows(3) == 0);
+    assert(linuxVisualMenuEffect(2, 0) == VISUAL_WIDE_GLOW);
+    assert(linuxVisualMenuEffect(2, 1) == VISUAL_CINEMATIC_FOCUS);
+    assert(linuxVisualMenuEffect(2, 2) == VISUAL_PAINTERLY);
+    assert(linuxVisualMenuEffect(2, 3) == VISUAL_EFFECT_COUNT);
     assert(linuxVisualMenuEffect(0, 0) == VISUAL_COLOR_GRADE);
     assert(linuxVisualMenuEffect(0, 1) == VISUAL_VIGNETTE);
     assert(linuxVisualMenuEffect(1, 0) == VISUAL_SOFT_PIXELS);
@@ -135,19 +147,31 @@ static void visualMenu(void) {
     unsigned old_tilt = linuxVisualEffectEnabled(VISUAL_TILT_SHIFT);
     menuPress(1u << 0);
     assert(linuxVisualEffectEnabled(VISUAL_TILT_SHIFT) != old_tilt);
-    // L wraps back to the light tab and resets selection to the first item.
+    // L cycles to the light tab, resetting selection to the first item.
     menuPress(1u << 9);
     inspectTab(0);
     menuPress(1u << 11); // up at first item stays on the first item
     menuPress(1u << 0);
     assert(linuxVisualEffectEnabled(VISUAL_COLOR_GRADE) != old_grade);
-    // L wraps backwards, too. B closes even if A is simultaneously pressed.
+    // L wraps backwards to the new GPU-intensive third tab.
     menuPress(1u << 9);
-    inspectTab(1);
-    unsigned old_bloom = linuxVisualEffectEnabled(VISUAL_BLOOM);
+    inspectTab(2);
+    unsigned before_wide = linuxVisualEffectEnabled(VISUAL_WIDE_GLOW);
+    menuPress(1u << 0);
+    assert(linuxVisualEffectEnabled(VISUAL_WIDE_GLOW) != before_wide);
+    menuPress(1u << 12);
+    unsigned before_focus = linuxVisualEffectEnabled(VISUAL_CINEMATIC_FOCUS);
+    menuPress(1u << 0);
+    assert(linuxVisualEffectEnabled(VISUAL_CINEMATIC_FOCUS) != before_focus);
+    menuPress(1u << 12);
+    unsigned before_painter = linuxVisualEffectEnabled(VISUAL_PAINTERLY);
+    menuPress(1u << 0);
+    assert(linuxVisualEffectEnabled(VISUAL_PAINTERLY) != before_painter);
+    // B closes even if A is simultaneously pressed.
+    unsigned painter_at_close = linuxVisualEffectEnabled(VISUAL_PAINTERLY);
     menuPress((1u << 0) | (1u << 1));
     assert(!linuxRoadmapOpen());
-    assert(linuxVisualEffectEnabled(VISUAL_BLOOM) == old_bloom);
+    assert(linuxVisualEffectEnabled(VISUAL_PAINTERLY) == painter_at_close);
     assert(linuxRoadmapCapturesInput()); // hold closing button until release
     menu_snapshot.buttons = 0;
     menu_snapshot.timestamp_ns += 10000000ull;
