@@ -11,7 +11,7 @@ include $(DEVKITPRO)/libnx/switch_rules
 TARGET      := PokeMMO
 APP_TITLE   := NXpanded
 APP_AUTHOR  := WyzeCorp
-APP_VERSION := 2.0.0-rc.1
+APP_VERSION := 2.0.1
 ICON        := icon.jpg
 
 BUILD    := build
